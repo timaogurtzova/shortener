@@ -5,19 +5,20 @@ import (
 	"errors"
 	"math/big"
 	"strings"
-	"sync"
+
+	"github.com/timaogurtzova/shortener/internal/repository"
 )
 
 const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 // ShortenerService хранит mapping id → URL
 type ShortenerService struct {
-	store sync.Map // потокобезопасная map
+	repo repository.URLRepository
 }
 
 // NewShortenerService создаёт сервис
-func NewShortenerService() *ShortenerService {
-	return &ShortenerService{}
+func NewShortenerService(repo repository.URLRepository) *ShortenerService {
+	return &ShortenerService{repo: repo}
 }
 
 // GenerateID создаёт случайный ID длиной n
@@ -38,27 +39,21 @@ func GenerateID(n int) (string, error) {
 
 // Create сохраняет URL и возвращает сгенерированный ID
 func (s *ShortenerService) Create(url string) (string, error) {
-	for {
+	const maxTries = 10
+	for i := 0; i < maxTries; i++ {
 		id, err := GenerateID(8)
 		if err != nil {
 			return "", err
 		}
 
-		// Проверяем коллизию
-		_, exists := s.store.Load(id)
-		if !exists {
-			s.store.Store(id, url)
+		if err := s.repo.Store(id, url); err == nil {
 			return id, nil
 		}
-		// если коллизия, повторяем генерацию
 	}
+	return "", errors.New("cannot generate unique id after 10 attempts")
 }
 
 // Resolve возвращает оригинальный URL по ID
 func (s *ShortenerService) Resolve(id string) (string, error) {
-	value, ok := s.store.Load(id)
-	if !ok {
-		return "", errors.New("not found")
-	}
-	return value.(string), nil
+	return s.repo.Load(id)
 }

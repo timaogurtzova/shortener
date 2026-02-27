@@ -10,7 +10,7 @@ import (
 
 // CreateHandler адаптирует HTTP-запрос на создание короткого URL
 type CreateHandler struct {
-	Service *service.ShortenerService
+	Service service.URLShortener
 	BaseURL string
 }
 

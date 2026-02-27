@@ -8,7 +8,7 @@ import (
 
 // RedirectHandler обрабатывает GET /{id} запрос на редирект по короткому URL
 type RedirectHandler struct {
-	Service *service.ShortenerService
+	Service service.URLShortener
 }
 
 func (h *RedirectHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
