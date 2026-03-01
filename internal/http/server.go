@@ -1,9 +1,14 @@
-package http
+package httpserver
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
-	"strings"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
@@ -11,54 +16,96 @@ import (
 )
 
 type Server struct {
-	server *http.Server
-	router chi.Router
-	cfg    *config.Configuration
+	httpServer *http.Server
 }
 
-func NewServer(cfg *config.Configuration, createHandler, redirectHandler http.Handler) *Server {
-	s := &Server{
-		router: configureRouter(createHandler, redirectHandler),
-		cfg:    cfg,
+func NewServer(cfg *config.Configuration, router http.Handler) *Server {
+	return &Server{
+		httpServer: &http.Server{
+			Addr:         cfg.Server.Address,
+			Handler:      router,
+			IdleTimeout:  cfg.Server.IdleTimeout,
+			ReadTimeout:  cfg.Server.ReadTimeout,
+			WriteTimeout: cfg.Server.WriteTimeout,
+		},
 	}
-	s.server = s.setupHTTPServer()
-
-	return s
 }
 
-func configureRouter(createHandler, redirectHandler http.Handler) chi.Router {
+func NewRouter(createHandlerFunc, redirectHandlerFunc http.HandlerFunc) http.Handler {
 	r := chi.NewRouter()
-	r.Post("/", createHandler.ServeHTTP)
-	r.Get("/{id}", redirectHandler.ServeHTTP)
 
-	// Любой неразрешённый метод на существующем пути
-	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "bad request", http.StatusBadRequest)
-	})
+	r.Use(loggingMiddleware)
+	// --- Routes ---
+	r.Post("/", createHandlerFunc)
+	r.Get("/{id}", redirectHandlerFunc)
 
-	// Любой несуществующий путь
+	// --- Fallback ---
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "bad request", http.StatusBadRequest)
+		http.Error(w, "not found", http.StatusBadRequest)
 	})
+
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "method not allowed", http.StatusBadRequest)
+	})
+
 	return r
 }
 
-func (s *Server) setupHTTPServer() *http.Server {
-	return &http.Server{
-		Addr:         fmt.Sprintf(":%s", strings.TrimPrefix(s.cfg.Server.Port, ":")),
-		Handler:      s.router,
-		IdleTimeout:  s.cfg.Server.IdleTimeout,
-		ReadTimeout:  s.cfg.Server.ReadTimeout,
-		WriteTimeout: s.cfg.Server.WriteTimeout,
-	}
+// --- Middleware для логирования ---
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Info().
+			Str("method", r.Method).
+			Str("url", r.URL.String()).
+			Msg("Incoming request")
+		next.ServeHTTP(w, r)
+	})
 }
 
-// Run запускает HTTP-сервер на указанном адресе
-func (s *Server) Run() {
-	log.Info().
-		Str("addr", s.server.Addr).
-		Msg("Starting HTTP server...")
-	if err := s.server.ListenAndServe(); err != nil {
-		log.Fatal().Err(err).Msg("HTTP server error")
+// Run
+// — запускает сервер
+// — обрабатывает graceful shutdown (и по сигналу, и по ошибке сервера)
+func (s *Server) Run() error {
+	errChan := make(chan error, 1)
+	// Запуск сервера в отдельной горутине
+	go func() {
+		log.Info().
+			Str("addr", s.httpServer.Addr).
+			Msg("HTTP server started")
+
+		if err := s.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errChan <- err
+		}
+
+		log.Info().Msg("Stopped serving new connections")
+		close(errChan)
+	}()
+
+	// Канал сигналов ОС
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Ждём либо сигнала ОС, либо ошибки сервера
+	select {
+	case sig := <-sigChan:
+		log.Info().Str("signal", sig.String()).Msg("shutdown signal received")
+	case err := <-errChan:
+		if err != nil {
+			return fmt.Errorf("server error: %w", err)
+		}
 	}
+
+	// graceful shutdown
+	shutdownTimeout := 10 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	log.Info().Msg("shutting down http server")
+
+	if err := s.httpServer.Shutdown(ctx); err != nil {
+		return fmt.Errorf("could not gracefully shutdown: %w", err)
+	}
+
+	log.Info().Msg("Server shutdown gracefully")
+	return nil
 }

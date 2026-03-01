@@ -1,4 +1,4 @@
-package handler
+package handler_test
 
 import (
 	"errors"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/timaogurtzova/shortener/internal/http/handler"
 	"github.com/timaogurtzova/shortener/internal/service"
 )
 
@@ -102,16 +103,14 @@ func TestCreateHandler(t *testing.T) {
 				}
 			}
 
-			handler := &CreateHandler{
-				Service: svc,
-			}
+			h := handler.NewCreateHandler(svc, "http://localhost:8080")
 
 			req := httptest.NewRequest(test.method, "/", strings.NewReader(test.body))
 			req.Header.Set("Content-Type", test.contentType)
 			req.Host = "localhost:8080"
 			rec := httptest.NewRecorder()
 
-			handler.ServeHTTP(rec, req)
+			h.Create(rec, req)
 
 			res := rec.Result()
 			defer res.Body.Close()

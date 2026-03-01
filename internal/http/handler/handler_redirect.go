@@ -9,10 +9,14 @@ import (
 
 // RedirectHandler обрабатывает GET /{id} запрос на редирект по короткому URL
 type RedirectHandler struct {
-	Service service.URLShortener
+	service service.URLShortener
 }
 
-func (h *RedirectHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func NewRedirectHandler(service service.URLShortener) *RedirectHandler {
+	return &RedirectHandler{service: service}
+}
+
+func (h *RedirectHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 	// Валидация пути
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -21,7 +25,7 @@ func (h *RedirectHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Вызов бизнес-логики
-	originalURL, err := h.Service.Resolve(id)
+	originalURL, err := h.service.Resolve(id)
 	if err != nil {
 		http.Error(w, "bad request: id not found", http.StatusBadRequest)
 		return

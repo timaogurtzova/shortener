@@ -10,20 +10,23 @@ import (
 )
 
 func main() {
-	//Загружаем конфигурацию из yml
+	//Configuration
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Error loading config")
 		return
 	}
-
+	//Repository
 	repo := repository.NewInMemoryStore()
+	//Service
 	svc := service.NewShortenerService(repo)
-
-	createHandler := &handler.CreateHandler{Service: svc}
-	redirectHandler := &handler.RedirectHandler{Service: svc}
-
-	// Создаём сервер и запускаем его
-	srv := http.NewServer(cfg, createHandler, redirectHandler)
-	srv.Run()
+	//Handlers
+	createHandler := handler.NewCreateHandler(svc, cfg.Server.BaseURL)
+	redirectHandler := handler.NewRedirectHandler(svc)
+	router := httpserver.NewRouter(createHandler.Create, redirectHandler.Redirect)
+	// HTTP server
+	server := httpserver.NewServer(cfg, router)
+	if err := server.Run(); err != nil {
+		log.Fatal().Err(err).Msg("server stopped with error")
+	}
 }

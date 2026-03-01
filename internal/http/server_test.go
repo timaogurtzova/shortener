@@ -1,4 +1,4 @@
-package http
+package httpserver_test
 
 import (
 	"io"
@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/timaogurtzova/shortener/internal/http"
 )
 
 func TestServerRouting(t *testing.T) {
@@ -33,7 +34,7 @@ func TestServerRouting(t *testing.T) {
 			name:         "GET / -> createHandler bad method",
 			method:       http.MethodGet,
 			path:         "/",
-			wantBody:     "bad request",
+			wantBody:     "method not allowed",
 			wantCode:     http.StatusBadRequest,
 			wantCreate:   false,
 			wantRedirect: false,
@@ -51,7 +52,7 @@ func TestServerRouting(t *testing.T) {
 			name:         "POST /abc -> redirectHandler bad method",
 			method:       http.MethodPost,
 			path:         "/abc",
-			wantBody:     "bad request",
+			wantBody:     "method not allowed",
 			wantCode:     http.StatusBadRequest,
 			wantCreate:   false,
 			wantRedirect: false,
@@ -60,10 +61,11 @@ func TestServerRouting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Флаги для проверки вызова handler'ов
 			createCalled := false
 			redirectCalled := false
 
-			// Мок CreateHandler с проверкой метода
+			// Мок CreateHandler
 			createHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				createCalled = true
 				if r.Method != http.MethodPost {
@@ -74,7 +76,7 @@ func TestServerRouting(t *testing.T) {
 				w.Write([]byte("create"))
 			})
 
-			// Мок RedirectHandler с проверкой метода
+			// Мок RedirectHandler
 			redirectHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				redirectCalled = true
 				if r.Method != http.MethodGet {
@@ -85,12 +87,10 @@ func TestServerRouting(t *testing.T) {
 				w.Write([]byte("redirect"))
 			})
 
-			// Создаем сервер
-			srv := &Server{
-				router: configureRouter(createHandler, redirectHandler),
-			}
+			// Создаём handler через NewRouter (production-стиль)
+			router := httpserver.NewRouter(createHandler, redirectHandler)
 
-			// Создаем рекордер и запрос
+			// Создаём рекордер и запрос
 			var bodyReader *strings.Reader
 			if tt.method == http.MethodPost {
 				bodyReader = strings.NewReader("body")
@@ -100,14 +100,15 @@ func TestServerRouting(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, bodyReader)
 			rec := httptest.NewRecorder()
 
-			srv.router.ServeHTTP(rec, req)
+			// ServeHTTP через handler
+			router.ServeHTTP(rec, req)
 
 			resp := rec.Result()
 			defer resp.Body.Close()
 
 			respBody, _ := io.ReadAll(resp.Body)
 
-			// Проверяем код и тело ответа
+			// Проверка статуса и тела ответа
 			assert.Equal(t, tt.wantCode, resp.StatusCode)
 			if tt.wantCode >= 400 {
 				assert.Equal(t, tt.wantBody+"\n", string(respBody))
@@ -115,7 +116,7 @@ func TestServerRouting(t *testing.T) {
 				assert.Equal(t, tt.wantBody, string(respBody))
 			}
 
-			// Проверяем, какие handler’ы вызваны
+			// Проверка, какой handler был вызван
 			assert.Equal(t, tt.wantCreate, createCalled)
 			assert.Equal(t, tt.wantRedirect, redirectCalled)
 		})

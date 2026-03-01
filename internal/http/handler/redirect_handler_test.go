@@ -1,4 +1,4 @@
-package handler
+package handler_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
+	"github.com/timaogurtzova/shortener/internal/http/handler"
 	"github.com/timaogurtzova/shortener/internal/service"
 )
 
@@ -88,7 +89,7 @@ func TestRedirectHandler(t *testing.T) {
 				}
 			}
 
-			handler := &RedirectHandler{Service: svc}
+			h := handler.NewRedirectHandler(svc)
 			req := httptest.NewRequest(test.method, test.path, nil)
 			req.Host = "localhost:8080"
 
@@ -102,7 +103,7 @@ func TestRedirectHandler(t *testing.T) {
 
 			rec := httptest.NewRecorder()
 
-			handler.ServeHTTP(rec, req)
+			h.Redirect(rec, req)
 			res := rec.Result()
 			defer res.Body.Close()
 

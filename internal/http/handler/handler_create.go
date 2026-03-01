@@ -14,11 +14,15 @@ const (
 )
 
 type CreateHandler struct {
-	Service service.URLShortener
+	service service.URLShortener
+	baseURL string
 }
 
-// ServeHTTP реализует интерфейс http.Handler
-func (h *CreateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func NewCreateHandler(service service.URLShortener, baseURL string) *CreateHandler {
+	return &CreateHandler{service: service, baseURL: baseURL}
+}
+
+func (h *CreateHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Проверяем Content-Type (допускаем charset)
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), contentType) {
 		writeError(w, http.StatusBadRequest, "bad request")
@@ -42,34 +46,17 @@ func (h *CreateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Вызов бизнес-логики
-	id, err := h.Service.Create(originalURL)
+	id, err := h.service.Create(originalURL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
 	// Формирование ответа
-	baseURL := buildBaseURL(r)
-	shortURL := baseURL + "/" + id
+	shortURL := h.baseURL + "/" + id
 	w.Header().Set("Content-Type", contentType)
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(shortURL))
-}
-
-func buildBaseURL(r *http.Request) string {
-	scheme := "http"
-
-	// Если сервер работает по HTTPS
-	if r.TLS != nil {
-		scheme = "https"
-	}
-
-	// Если за reverse proxy (nginx, traefik)
-	if forwardedProto := r.Header.Get("X-Forwarded-Proto"); forwardedProto != "" {
-		scheme = forwardedProto
-	}
-
-	return scheme + "://" + r.Host
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

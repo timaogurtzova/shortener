@@ -17,7 +17,10 @@ func NewInMemoryStore() *InMemoryStore {
 
 // Store сохраняет URL по ID
 func (s *InMemoryStore) Store(id, url string) error {
-	s.store.Store(id, url)
+	_, loaded := s.store.LoadOrStore(id, url)
+	if loaded {
+		return errors.New("id already exists")
+	}
 	return nil
 }
 

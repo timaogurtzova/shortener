@@ -21,22 +21,6 @@ func NewShortenerService(repo repository.URLRepository) *ShortenerService {
 	return &ShortenerService{repo: repo}
 }
 
-// GenerateID создаёт случайный ID длиной n
-func GenerateID(n int) (string, error) {
-	var result strings.Builder
-	result.Grow(n)
-
-	for i := 0; i < n; i++ {
-		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
-		if err != nil {
-			return "", err
-		}
-		result.WriteByte(letters[num.Int64()])
-	}
-
-	return result.String(), nil
-}
-
 // Create сохраняет URL и возвращает сгенерированный ID
 func (s *ShortenerService) Create(url string) (string, error) {
 	const maxTries = 10
@@ -56,4 +40,20 @@ func (s *ShortenerService) Create(url string) (string, error) {
 // Resolve возвращает оригинальный URL по ID
 func (s *ShortenerService) Resolve(id string) (string, error) {
 	return s.repo.Load(id)
+}
+
+// GenerateID создаёт случайный ID длиной n
+func GenerateID(n int) (string, error) {
+	var result strings.Builder
+	result.Grow(n)
+
+	for i := 0; i < n; i++ {
+		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
+		if err != nil {
+			return "", err
+		}
+		result.WriteByte(letters[num.Int64()])
+	}
+
+	return result.String(), nil
 }
