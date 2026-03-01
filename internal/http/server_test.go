@@ -35,7 +35,7 @@ func TestServerRouting(t *testing.T) {
 			path:         "/",
 			wantBody:     "bad request",
 			wantCode:     http.StatusBadRequest,
-			wantCreate:   true,
+			wantCreate:   false,
 			wantRedirect: false,
 		},
 		{
@@ -54,7 +54,7 @@ func TestServerRouting(t *testing.T) {
 			wantBody:     "bad request",
 			wantCode:     http.StatusBadRequest,
 			wantCreate:   false,
-			wantRedirect: true,
+			wantRedirect: false,
 		},
 	}
 
@@ -86,7 +86,9 @@ func TestServerRouting(t *testing.T) {
 			})
 
 			// Создаем сервер
-			srv := NewServer(":0", createHandler, redirectHandler)
+			srv := &Server{
+				router: configureRouter(createHandler, redirectHandler),
+			}
 
 			// Создаем рекордер и запрос
 			var bodyReader *strings.Reader
@@ -98,8 +100,7 @@ func TestServerRouting(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, bodyReader)
 			rec := httptest.NewRecorder()
 
-			// Вызываем напрямую через mux
-			srv.mux.ServeHTTP(rec, req)
+			srv.router.ServeHTTP(rec, req)
 
 			resp := rec.Result()
 			defer resp.Body.Close()
@@ -109,7 +110,6 @@ func TestServerRouting(t *testing.T) {
 			// Проверяем код и тело ответа
 			assert.Equal(t, tt.wantCode, resp.StatusCode)
 			if tt.wantCode >= 400 {
-				// http.Error добавляет "\n"
 				assert.Equal(t, tt.wantBody+"\n", string(respBody))
 			} else {
 				assert.Equal(t, tt.wantBody, string(respBody))

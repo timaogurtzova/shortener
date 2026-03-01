@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/timaogurtzova/shortener/internal/service"
 )
 
@@ -12,14 +13,8 @@ type RedirectHandler struct {
 }
 
 func (h *RedirectHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Проверка метода
-	if r.Method != http.MethodGet {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-
 	// Валидация пути
-	id := r.URL.Path[1:]
+	id := chi.URLParam(r, "id")
 	if id == "" {
 		http.Error(w, "bad request: missing id", http.StatusBadRequest)
 		return

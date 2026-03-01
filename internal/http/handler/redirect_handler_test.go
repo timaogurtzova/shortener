@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/timaogurtzova/shortener/internal/service"
 )
@@ -32,27 +34,15 @@ func TestRedirectHandler(t *testing.T) {
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
 					ResolveMockFunc: func(id string) (string, error) {
-						return "https://example.com", nil
+						return "http://localhost", nil
 					},
 				}
 			},
 			want: want{
 				code:        http.StatusTemporaryRedirect,
-				location:    "https://example.com",
+				location:    "http://localhost",
 				body:        "",
-				contentType: "", // при редиректе Content-Type не нужен
-			},
-		},
-		{
-			name:   "неправильный метод",
-			method: http.MethodPost,
-			path:   "/abc123",
-			mock:   nil,
-			want: want{
-				code:        http.StatusBadRequest,
-				location:    "",
-				body:        "bad request\n",
-				contentType: "text/plain; charset=utf-8",
+				contentType: "",
 			},
 		},
 		{
@@ -100,6 +90,16 @@ func TestRedirectHandler(t *testing.T) {
 
 			handler := &RedirectHandler{Service: svc}
 			req := httptest.NewRequest(test.method, test.path, nil)
+			req.Host = "localhost:8080"
+
+			// --- Добавляем RouteContext только для GET с id ---
+			if test.method == http.MethodGet && test.path != "/" {
+				rctx := chi.NewRouteContext()
+				id := test.path[1:]
+				rctx.URLParams.Add("id", id)
+				req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+			}
+
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)

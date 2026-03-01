@@ -1,36 +1,64 @@
 package http
 
 import (
-	"log"
+	"fmt"
 	"net/http"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog/log"
+	"github.com/timaogurtzova/shortener/internal/config"
 )
 
 type Server struct {
-	mux  *http.ServeMux
-	addr string
+	server *http.Server
+	router chi.Router
+	cfg    *config.Configuration
 }
 
-func NewServer(addr string, createHandler, redirectHandler http.Handler) *Server {
-	mux := http.NewServeMux()
+func NewServer(cfg *config.Configuration, createHandler, redirectHandler http.Handler) *Server {
+	s := &Server{
+		router: configureRouter(createHandler, redirectHandler),
+		cfg:    cfg,
+	}
+	s.server = s.setupHTTPServer()
 
-	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
-			createHandler.ServeHTTP(w, r)
-		} else {
-			redirectHandler.ServeHTTP(w, r)
-		}
-	}))
+	return s
+}
 
-	return &Server{
-		mux:  mux,
-		addr: addr,
+func configureRouter(createHandler, redirectHandler http.Handler) chi.Router {
+	r := chi.NewRouter()
+	r.Post("/", createHandler.ServeHTTP)
+	r.Get("/{id}", redirectHandler.ServeHTTP)
+
+	// Любой неразрешённый метод на существующем пути
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+	})
+
+	// Любой несуществующий путь
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+	})
+	return r
+}
+
+func (s *Server) setupHTTPServer() *http.Server {
+	return &http.Server{
+		Addr:         fmt.Sprintf(":%s", strings.TrimPrefix(s.cfg.Server.Port, ":")),
+		Handler:      s.router,
+		IdleTimeout:  s.cfg.Server.IdleTimeout,
+		ReadTimeout:  s.cfg.Server.ReadTimeout,
+		WriteTimeout: s.cfg.Server.WriteTimeout,
 	}
 }
 
 // Run запускает HTTP-сервер на указанном адресе
 func (s *Server) Run() {
-	log.Printf("Server started at %s\n", s.addr)
-	if err := http.ListenAndServe(s.addr, s.mux); err != nil {
-		log.Fatalf("Server failed: %v", err)
+	log.Info().
+		Str("addr", s.server.Addr).
+		Msg("Starting HTTP server...")
+	if err := s.server.ListenAndServe(); err != nil {
+		log.Fatal().Err(err).Msg("HTTP server error")
 	}
 }

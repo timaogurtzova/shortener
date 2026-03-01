@@ -21,18 +21,18 @@ func TestCreateHandler(t *testing.T) {
 	}
 
 	tests := []struct {
-		name   string
-		method string
-		path   string
-		body   string
-		mock   func() *mockURLShortener
-		want   want
+		name        string
+		method      string
+		contentType string
+		body        string
+		mock        func() *mockURLShortener
+		want        want
 	}{
 		{
-			name:   "успешное создание",
-			method: http.MethodPost,
-			path:   "/",
-			body:   "https://example.com",
+			name:        "успешное создание",
+			method:      http.MethodPost,
+			body:        "http://localhost:8080",
+			contentType: "text/plain",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
 					CreateMockFunc: func(url string) (string, error) {
@@ -47,11 +47,11 @@ func TestCreateHandler(t *testing.T) {
 			},
 		},
 		{
-			name:   "неправильный метод",
-			method: http.MethodGet,
-			path:   "/",
-			body:   "",
-			mock:   nil,
+			name:        "неправильный Content-Type",
+			method:      http.MethodPost,
+			body:        "http://localhost:8080",
+			mock:        nil,
+			contentType: "error",
 			want: want{
 				code:        http.StatusBadRequest,
 				response:    "bad request\n",
@@ -59,11 +59,11 @@ func TestCreateHandler(t *testing.T) {
 			},
 		},
 		{
-			name:   "пустое тело запроса",
-			method: http.MethodPost,
-			path:   "/",
-			body:   "   ",
-			mock:   nil,
+			name:        "пустое тело запроса",
+			method:      http.MethodPost,
+			body:        "   ",
+			contentType: "text/plain",
+			mock:        nil,
 			want: want{
 				code:        http.StatusBadRequest,
 				response:    "bad request: empty body\n",
@@ -71,10 +71,10 @@ func TestCreateHandler(t *testing.T) {
 			},
 		},
 		{
-			name:   "ошибка сервиса",
-			method: http.MethodPost,
-			path:   "/",
-			body:   "https://example.com",
+			name:        "ошибка сервиса",
+			method:      http.MethodPost,
+			body:        "http://localhost:8080",
+			contentType: "text/plain",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
 					CreateMockFunc: func(url string) (string, error) {
@@ -104,10 +104,11 @@ func TestCreateHandler(t *testing.T) {
 
 			handler := &CreateHandler{
 				Service: svc,
-				BaseURL: "http://localhost:8080",
 			}
 
-			req := httptest.NewRequest(test.method, test.path, strings.NewReader(test.body))
+			req := httptest.NewRequest(test.method, "/", strings.NewReader(test.body))
+			req.Header.Set("Content-Type", test.contentType)
+			req.Host = "localhost:8080"
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
