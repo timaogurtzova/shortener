@@ -1,10 +1,11 @@
-package service
+package service_test
 
 import (
 	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/timaogurtzova/shortener/internal/service"
 )
 
 func TestShortenerService_Create(t *testing.T) {
@@ -34,7 +35,7 @@ func TestShortenerService_Create(t *testing.T) {
 			mockRepo := &mockURLRepository{
 				storeFunc: tt.mockStoreFunc,
 			}
-			svc := NewShortenerService(mockRepo)
+			svc := service.NewShortenerService(mockRepo)
 
 			id, err := svc.Create("https://example.com")
 			if tt.wantErr {
@@ -77,7 +78,7 @@ func TestShortenerService_Resolve(t *testing.T) {
 			mockRepo := &mockURLRepository{
 				loadFunc: tt.mockLoad,
 			}
-			svc := NewShortenerService(mockRepo)
+			svc := service.NewShortenerService(mockRepo)
 
 			url, err := svc.Resolve("abc123")
 			if tt.wantErr {

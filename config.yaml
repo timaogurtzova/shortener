@@ -1,6 +1,0 @@
-server:
-  address: "localhost:8080"
-  base_url: "http://localhost:8080"
-  idle_timeout: 60s
-  read_timeout: 60s
-  write_timeout: 60s

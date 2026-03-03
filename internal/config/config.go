@@ -2,11 +2,10 @@ package config
 
 import (
 	"flag"
-	"fmt"
+	"net"
 	"net/url"
 	"time"
 
-	"github.com/ilyakaznacheev/cleanenv"
 	"github.com/rs/zerolog/log"
 )
 
@@ -21,25 +20,28 @@ type ServerConfiguration struct {
 	WriteTimeout time.Duration `yaml:"write_timeout"`
 }
 
-const DefaultConfigPath = "config.yaml"
-
-// LoadConfig загружает конфигурацию из YAML и переопределяет её аргументами командной строки
-func LoadConfig() (*Configuration, error) {
-	var cfg Configuration
-
-	// 1. YAML для значений по умолчанию
-	if err := cleanenv.ReadConfig(DefaultConfigPath, &cfg); err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
+func defaultConfig() *Configuration {
+	return &Configuration{
+		Server: ServerConfiguration{
+			Address:      "localhost:8080",
+			BaseURL:      "http://localhost:8080",
+			IdleTimeout:  60 * time.Second,
+			ReadTimeout:  60 * time.Second,
+			WriteTimeout: 60 * time.Second,
+		},
 	}
-	log.Info().Msg("Config loaded from YAML")
+}
 
-	// 2. Аргументы командной строки
+func LoadConfig() (*Configuration, error) {
+	cfg := defaultConfig()
+
+	// Аргументы командной строки
 	cliAddr := flag.String("a", "", "Address for HTTP server (host:port)")
 	cliBaseURL := flag.String("b", "", "Base URL for short links")
 	flag.Parse()
 
-	// 3. Переопределяем значения, если флаги заданы и они корректные
-	if cliAddr != nil && *cliAddr != "" {
+	// Переопределяем значения, если флаги заданы и они корректные
+	if *cliAddr != "" {
 		if isValidAddress(*cliAddr) {
 			cfg.Server.Address = *cliAddr
 			log.Info().Str("Address", *cliAddr).Msg("Overriding Address from CLI")
@@ -47,10 +49,10 @@ func LoadConfig() (*Configuration, error) {
 			log.Warn().Str("Address", *cliAddr).Msg("Invalid CLI Address, using YAML value")
 		}
 	} else {
-		log.Info().Msg("CLI flag -a not provided, using YAML Address")
+		log.Info().Msg("CLI flag -a not provided, using default Address")
 	}
 
-	if cliBaseURL != nil && *cliBaseURL != "" {
+	if *cliBaseURL != "" {
 		if isValidURL(*cliBaseURL) {
 			cfg.Server.BaseURL = *cliBaseURL
 			log.Info().Str("BaseURL", *cliBaseURL).Msg("Overriding BaseURL from CLI")
@@ -58,24 +60,16 @@ func LoadConfig() (*Configuration, error) {
 			log.Warn().Str("BaseURL", *cliBaseURL).Msg("Invalid CLI BaseURL, using YAML value")
 		}
 	} else {
-		log.Info().Msg("CLI flag -b not provided, using YAML BaseURL")
+		log.Info().Msg("CLI flag -b not provided, using default BaseURL")
 	}
 
-	return &cfg, nil
+	return cfg, nil
 }
 
 // проверка корректности host:port
 func isValidAddress(addr string) bool {
-	return len(addr) > 0 && (addr[0] == ':' || containsPort(addr))
-}
-
-func containsPort(addr string) bool {
-	for i := 0; i < len(addr); i++ {
-		if addr[i] == ':' {
-			return true
-		}
-	}
-	return false
+	_, err := net.ResolveTCPAddr("tcp", addr)
+	return err == nil
 }
 
 // Проверка корректности URL
