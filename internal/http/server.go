@@ -32,12 +32,13 @@ func NewServer(cfg *config.Configuration, router http.Handler) *Server {
 	}
 }
 
-func NewRouter(createHandlerFunc, redirectHandlerFunc http.HandlerFunc) http.Handler {
+func NewRouter(createHandlerFunc, createJSONHandlerFunc, redirectHandlerFunc http.HandlerFunc) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(loggingMiddleware)
 	// --- Routes ---
 	r.Post("/", createHandlerFunc)
+	r.Post("/api/shorten", createJSONHandlerFunc)
 	r.Get("/{id}", redirectHandlerFunc)
 
 	// --- Fallback ---

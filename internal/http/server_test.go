@@ -16,67 +16,92 @@ import (
 
 func TestServerRouting(t *testing.T) {
 	tests := []struct {
-		name         string
-		method       string
-		path         string
-		wantBody     string
-		wantCode     int
-		wantCreate   bool
-		wantRedirect bool
+		name                        string
+		method                      string
+		path                        string
+		wantBody                    string
+		wantCode                    int
+		wantCreateShortURLPlainText bool
+		wantCreateShortURLJSON      bool
+		wantRedirect                bool
 	}{
 		{
-			name:         "POST / -> createHandler ok",
-			method:       http.MethodPost,
-			path:         "/",
-			wantBody:     "create",
-			wantCode:     http.StatusCreated,
-			wantCreate:   true,
-			wantRedirect: false,
+			name:                        "POST / -> createShortURLPlainText handler ok",
+			method:                      http.MethodPost,
+			path:                        "/",
+			wantBody:                    "create",
+			wantCode:                    http.StatusCreated,
+			wantCreateShortURLPlainText: true,
+			wantCreateShortURLJSON:      false,
+			wantRedirect:                false,
 		},
 		{
-			name:         "GET / -> createHandler bad method",
-			method:       http.MethodGet,
-			path:         "/",
-			wantBody:     "method not allowed",
-			wantCode:     http.StatusBadRequest,
-			wantCreate:   false,
-			wantRedirect: false,
+			name:                        "GET / -> createShortURLPlainText bad method",
+			method:                      http.MethodGet,
+			path:                        "/",
+			wantBody:                    "method not allowed",
+			wantCode:                    http.StatusBadRequest,
+			wantCreateShortURLPlainText: false,
+			wantCreateShortURLJSON:      false,
+			wantRedirect:                false,
 		},
 		{
-			name:         "GET /abc -> redirectHandler ok",
-			method:       http.MethodGet,
-			path:         "/abc",
-			wantBody:     "redirect",
-			wantCode:     http.StatusTemporaryRedirect,
-			wantCreate:   false,
-			wantRedirect: true,
+			name:                        "POST /api/shorten -> createShortURLJSON handler ok",
+			method:                      http.MethodPost,
+			path:                        "/api/shorten",
+			wantBody:                    "create-json",
+			wantCode:                    http.StatusCreated,
+			wantCreateShortURLPlainText: false,
+			wantCreateShortURLJSON:      true,
+			wantRedirect:                false,
 		},
 		{
-			name:         "POST /abc -> redirectHandler bad method",
-			method:       http.MethodPost,
-			path:         "/abc",
-			wantBody:     "method not allowed",
-			wantCode:     http.StatusBadRequest,
-			wantCreate:   false,
-			wantRedirect: false,
+			name:                        "GET /abc -> redirectHandler ok",
+			method:                      http.MethodGet,
+			path:                        "/abc",
+			wantBody:                    "redirect",
+			wantCode:                    http.StatusTemporaryRedirect,
+			wantCreateShortURLPlainText: false,
+			wantCreateShortURLJSON:      false,
+			wantRedirect:                true,
+		},
+		{
+			name:                        "POST /abc -> redirectHandler bad method",
+			method:                      http.MethodPost,
+			path:                        "/abc",
+			wantBody:                    "method not allowed",
+			wantCode:                    http.StatusBadRequest,
+			wantCreateShortURLPlainText: false,
+			wantCreateShortURLJSON:      false,
+			wantRedirect:                false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Флаги для проверки вызова handler'ов
-			createCalled := false
+			createShortURLPlainTextCalled := false
+			createShortURLJSONCalled := false
 			redirectCalled := false
 
-			// Мок CreateHandler
-			createHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				createCalled = true
+			createShortURLPlainTextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				createShortURLPlainTextCalled = true
 				if r.Method != http.MethodPost {
 					http.Error(w, "bad request", http.StatusBadRequest)
 					return
 				}
 				w.WriteHeader(http.StatusCreated)
 				w.Write([]byte("create"))
+			})
+
+			createShortURLJSONHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				createShortURLJSONCalled = true
+				if r.Method != http.MethodPost {
+					http.Error(w, "bad request", http.StatusBadRequest)
+					return
+				}
+				w.WriteHeader(http.StatusCreated)
+				w.Write([]byte("create-json"))
 			})
 
 			// Мок RedirectHandler
@@ -91,7 +116,7 @@ func TestServerRouting(t *testing.T) {
 			})
 
 			// Создаём handler через NewRouter (production-стиль)
-			router := httpserver.NewRouter(createHandler, redirectHandler)
+			router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, redirectHandler)
 
 			// Создаём рекордер и запрос
 			var bodyReader *strings.Reader
@@ -120,7 +145,8 @@ func TestServerRouting(t *testing.T) {
 			}
 
 			// Проверка, какой handler был вызван
-			assert.Equal(t, tt.wantCreate, createCalled)
+			assert.Equal(t, tt.wantCreateShortURLPlainText, createShortURLPlainTextCalled)
+			assert.Equal(t, tt.wantCreateShortURLJSON, createShortURLJSONCalled)
 			assert.Equal(t, tt.wantRedirect, redirectCalled)
 		})
 	}
@@ -134,7 +160,7 @@ func TestLoggingMiddlewareLogsRequestAndResponseData(t *testing.T) {
 		log.Logger = oldLogger
 	})
 
-	createHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	createShortURLPlainTextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte("create"))
 	})
@@ -144,7 +170,7 @@ func TestLoggingMiddlewareLogsRequestAndResponseData(t *testing.T) {
 		w.Write([]byte("redirect"))
 	})
 
-	router := httpserver.NewRouter(createHandler, redirectHandler)
+	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLPlainTextHandler, redirectHandler)
 
 	req := httptest.NewRequest(http.MethodPost, "/?trace=1", strings.NewReader("body"))
 	rec := httptest.NewRecorder()
@@ -168,7 +194,7 @@ func TestLoggingMiddlewareLogsImplicitStatusCode(t *testing.T) {
 		log.Logger = oldLogger
 	})
 
-	createHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	createShortURLPlainTextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("create"))
 	})
 
@@ -177,7 +203,7 @@ func TestLoggingMiddlewareLogsImplicitStatusCode(t *testing.T) {
 		w.Write([]byte("redirect"))
 	})
 
-	router := httpserver.NewRouter(createHandler, redirectHandler)
+	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLPlainTextHandler, redirectHandler)
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("body"))
 	rec := httptest.NewRecorder()

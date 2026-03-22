@@ -23,7 +23,7 @@ func main() {
 	//Handlers
 	createHandler := handler.NewCreateHandler(svc, cfg.Server.BaseURL)
 	redirectHandler := handler.NewRedirectHandler(svc)
-	router := httpserver.NewRouter(createHandler.Create, redirectHandler.Redirect)
+	router := httpserver.NewRouter(createHandler.CreateShortURLPlainText, createHandler.CreateShortURLJSON, redirectHandler.Redirect)
 	// HTTP server
 	server := httpserver.NewServer(cfg, router)
 	if err := server.Run(); err != nil {
