@@ -17,7 +17,11 @@ func main() {
 		return
 	}
 	//Repository
-	repo := repository.NewInMemoryStore()
+	repo, err := repository.NewFileStore(cfg.Storage.FileStoragePath)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Error initializing file storage")
+		return
+	}
 	//Service
 	svc := service.NewShortenerService(repo)
 	//Handlers

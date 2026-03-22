@@ -13,7 +13,8 @@ import (
 )
 
 type Configuration struct {
-	Server ServerConfiguration
+	Server  ServerConfiguration
+	Storage StorageConfiguration
 }
 
 type ServerConfiguration struct {
@@ -24,6 +25,10 @@ type ServerConfiguration struct {
 	WriteTimeout time.Duration `env:"SERVER_WRITE_TIMEOUT"`
 }
 
+type StorageConfiguration struct {
+	FileStoragePath string `env:"FILE_STORAGE_PATH"`
+}
+
 func defaultConfig() *Configuration {
 	return &Configuration{
 		Server: ServerConfiguration{
@@ -32,6 +37,9 @@ func defaultConfig() *Configuration {
 			IdleTimeout:  60 * time.Second,
 			ReadTimeout:  60 * time.Second,
 			WriteTimeout: 60 * time.Second,
+		},
+		Storage: StorageConfiguration{
+			FileStoragePath: "storage.json",
 		},
 	}
 }
@@ -50,12 +58,15 @@ func loadConfig(args []string, envOptions env.Options) (*Configuration, error) {
 
 	cfg.Server.Address = resolveAddress(cfg.Server.Address, cliCfg.Address)
 	cfg.Server.BaseURL = resolveBaseURL(cfg.Server.BaseURL, cliCfg.BaseURL)
+	cfg.Storage.FileStoragePath = resolveFileStoragePath(cfg.Storage.FileStoragePath, cliCfg.FileStoragePath)
 
 	addressBeforeEnv := cfg.Server.Address
 	baseURLBeforeEnv := cfg.Server.BaseURL
+	fileStoragePathBeforeEnv := cfg.Storage.FileStoragePath
 
 	var addressFromEnv bool
 	var baseURLFromEnv bool
+	var fileStoragePathFromEnv bool
 
 	userOnSet := envOptions.OnSet
 	envOptions.OnSet = func(tag string, value interface{}, isDefault bool) {
@@ -64,6 +75,8 @@ func loadConfig(args []string, envOptions env.Options) (*Configuration, error) {
 			addressFromEnv = true
 		case "BASE_URL":
 			baseURLFromEnv = true
+		case "FILE_STORAGE_PATH":
+			fileStoragePathFromEnv = true
 		}
 
 		if userOnSet != nil {
@@ -72,6 +85,9 @@ func loadConfig(args []string, envOptions env.Options) (*Configuration, error) {
 	}
 
 	if err := env.ParseWithOptions(&cfg.Server, envOptions); err != nil {
+		return nil, err
+	}
+	if err := env.ParseWithOptions(&cfg.Storage, envOptions); err != nil {
 		return nil, err
 	}
 
@@ -92,13 +108,22 @@ func loadConfig(args []string, envOptions env.Options) (*Configuration, error) {
 			cfg.Server.BaseURL = baseURLBeforeEnv
 		}
 	}
+	if fileStoragePathFromEnv {
+		if cfg.Storage.FileStoragePath != "" {
+			log.Info().Str("FileStoragePath", cfg.Storage.FileStoragePath).Msg("Overriding FileStoragePath from environment")
+		} else {
+			log.Warn().Str("FileStoragePath", cfg.Storage.FileStoragePath).Msg("Empty FileStoragePath from environment, falling back to CLI or default value")
+			cfg.Storage.FileStoragePath = fileStoragePathBeforeEnv
+		}
+	}
 
 	return cfg, nil
 }
 
 type cliConfig struct {
-	Address string
-	BaseURL string
+	Address         string
+	BaseURL         string
+	FileStoragePath string
 }
 
 func parseCLIArgs(args []string) (cliConfig, error) {
@@ -126,6 +151,14 @@ func parseCLIArgs(args []string) (cliConfig, error) {
 			i++
 		case strings.HasPrefix(arg, "-b="):
 			cfg.BaseURL = strings.TrimPrefix(arg, "-b=")
+		case arg == "-f":
+			if i+1 >= len(args) {
+				return cliConfig{}, fmt.Errorf("flag needs an argument: -f")
+			}
+			cfg.FileStoragePath = args[i+1]
+			i++
+		case strings.HasPrefix(arg, "-f="):
+			cfg.FileStoragePath = strings.TrimPrefix(arg, "-f=")
 		}
 	}
 
@@ -155,6 +188,16 @@ func resolveBaseURL(defaultValue, cliValue string) string {
 	}
 
 	log.Info().Str("BaseURL", defaultValue).Msg("Using default BaseURL")
+	return defaultValue
+}
+
+func resolveFileStoragePath(defaultValue, cliValue string) string {
+	if cliValue != "" {
+		log.Info().Str("FileStoragePath", cliValue).Msg("Overriding FileStoragePath from CLI")
+		return cliValue
+	}
+
+	log.Info().Str("FileStoragePath", defaultValue).Msg("Using default FileStoragePath")
 	return defaultValue
 }
 

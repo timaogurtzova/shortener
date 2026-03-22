@@ -1,4 +1,4 @@
-package httpserver
+package middleware
 
 import (
 	"compress/gzip"
@@ -28,7 +28,7 @@ func (g *gzipBodyReadCloser) Close() error {
 	return g.body.Close()
 }
 
-func gunzipRequestMiddleware(next http.Handler) http.Handler {
+func GunzipRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		encoding, ok := requestContentEncoding(r.Header.Values("Content-Encoding"))
 		if !ok {

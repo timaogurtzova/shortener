@@ -11,9 +11,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog/log"
 	"github.com/timaogurtzova/shortener/internal/config"
+	httpmiddleware "github.com/timaogurtzova/shortener/internal/http/middleware"
 )
 
 type Server struct {
@@ -35,9 +36,9 @@ func NewServer(cfg *config.Configuration, router http.Handler) *Server {
 func NewRouter(createHandlerFunc, createJSONHandlerFunc, redirectHandlerFunc http.HandlerFunc) http.Handler {
 	r := chi.NewRouter()
 
-	r.Use(loggingMiddleware)
-	r.Use(gunzipRequestMiddleware)
-	r.Use(middleware.Compress(5, "application/json", "text/html"))
+	r.Use(httpmiddleware.Logging)
+	r.Use(httpmiddleware.GunzipRequest)
+	r.Use(chimiddleware.Compress(5, "application/json", "text/html"))
 	// --- Routes ---
 	r.Post("/", createHandlerFunc)
 	r.Post("/api/shorten", createJSONHandlerFunc)
@@ -53,29 +54,6 @@ func NewRouter(createHandlerFunc, createJSONHandlerFunc, redirectHandlerFunc htt
 	})
 
 	return r
-}
-
-// --- Middleware для логирования ---
-func loggingMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-
-		next.ServeHTTP(ww, r)
-
-		status := ww.Status()
-		if status == 0 {
-			status = http.StatusOK
-		}
-
-		log.Info().
-			Str("uri", r.RequestURI).
-			Str("method", r.Method).
-			Str("duration", time.Since(start).String()).
-			Int("status", status).
-			Int("size", ww.BytesWritten()).
-			Msg("HTTP request completed")
-	})
 }
 
 // Run
