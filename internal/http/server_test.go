@@ -1,12 +1,15 @@
 package httpserver_test
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/timaogurtzova/shortener/internal/http"
 )
@@ -121,4 +124,66 @@ func TestServerRouting(t *testing.T) {
 			assert.Equal(t, tt.wantRedirect, redirectCalled)
 		})
 	}
+}
+
+func TestLoggingMiddlewareLogsRequestAndResponseData(t *testing.T) {
+	var buf bytes.Buffer
+	oldLogger := log.Logger
+	log.Logger = zerolog.New(&buf).Level(zerolog.InfoLevel)
+	t.Cleanup(func() {
+		log.Logger = oldLogger
+	})
+
+	createHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte("create"))
+	})
+
+	redirectHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTemporaryRedirect)
+		w.Write([]byte("redirect"))
+	})
+
+	router := httpserver.NewRouter(createHandler, redirectHandler)
+
+	req := httptest.NewRequest(http.MethodPost, "/?trace=1", strings.NewReader("body"))
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	logOutput := buf.String()
+	assert.Contains(t, logOutput, `"level":"info"`)
+	assert.Contains(t, logOutput, `"uri":"/?trace=1"`)
+	assert.Contains(t, logOutput, `"method":"POST"`)
+	assert.Contains(t, logOutput, `"duration":"`)
+	assert.Contains(t, logOutput, `"status":201`)
+	assert.Contains(t, logOutput, `"size":6`)
+}
+
+func TestLoggingMiddlewareLogsImplicitStatusCode(t *testing.T) {
+	var buf bytes.Buffer
+	oldLogger := log.Logger
+	log.Logger = zerolog.New(&buf).Level(zerolog.InfoLevel)
+	t.Cleanup(func() {
+		log.Logger = oldLogger
+	})
+
+	createHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("create"))
+	})
+
+	redirectHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTemporaryRedirect)
+		w.Write([]byte("redirect"))
+	})
+
+	router := httpserver.NewRouter(createHandler, redirectHandler)
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("body"))
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, buf.String(), `"status":200`)
 }
