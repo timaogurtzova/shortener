@@ -1,23 +1,27 @@
 package config
 
 import (
-	"flag"
+	"fmt"
 	"net"
 	"net/url"
+	"os"
+	"strings"
 	"time"
 
+	env "github.com/caarlos0/env/v11"
 	"github.com/rs/zerolog/log"
 )
 
 type Configuration struct {
-	Server ServerConfiguration `yaml:"server"`
+	Server ServerConfiguration
 }
+
 type ServerConfiguration struct {
-	Address      string        `yaml:"address"`
-	BaseURL      string        `yaml:"base_url"`
-	IdleTimeout  time.Duration `yaml:"idle_timeout"`
-	ReadTimeout  time.Duration `yaml:"read_timeout"`
-	WriteTimeout time.Duration `yaml:"write_timeout"`
+	Address      string        `env:"SERVER_ADDRESS"`
+	BaseURL      string        `env:"BASE_URL"`
+	IdleTimeout  time.Duration `env:"SERVER_IDLE_TIMEOUT"`
+	ReadTimeout  time.Duration `env:"SERVER_READ_TIMEOUT"`
+	WriteTimeout time.Duration `env:"SERVER_WRITE_TIMEOUT"`
 }
 
 func defaultConfig() *Configuration {
@@ -33,37 +37,125 @@ func defaultConfig() *Configuration {
 }
 
 func LoadConfig() (*Configuration, error) {
+	return loadConfig(os.Args[1:], env.Options{})
+}
+
+func loadConfig(args []string, envOptions env.Options) (*Configuration, error) {
 	cfg := defaultConfig()
 
-	// Аргументы командной строки
-	cliAddr := flag.String("a", "", "Address for HTTP server (host:port)")
-	cliBaseURL := flag.String("b", "", "Base URL for short links")
-	flag.Parse()
-
-	// Переопределяем значения, если флаги заданы и они корректные
-	if *cliAddr != "" {
-		if isValidAddress(*cliAddr) {
-			cfg.Server.Address = *cliAddr
-			log.Info().Str("Address", *cliAddr).Msg("Overriding Address from CLI")
-		} else {
-			log.Warn().Str("Address", *cliAddr).Msg("Invalid CLI Address, using YAML value")
-		}
-	} else {
-		log.Info().Msg("CLI flag -a not provided, using default Address")
+	cliCfg, err := parseCLIArgs(args)
+	if err != nil {
+		return nil, err
 	}
 
-	if *cliBaseURL != "" {
-		if isValidURL(*cliBaseURL) {
-			cfg.Server.BaseURL = *cliBaseURL
-			log.Info().Str("BaseURL", *cliBaseURL).Msg("Overriding BaseURL from CLI")
-		} else {
-			log.Warn().Str("BaseURL", *cliBaseURL).Msg("Invalid CLI BaseURL, using YAML value")
+	cfg.Server.Address = resolveAddress(cfg.Server.Address, cliCfg.Address)
+	cfg.Server.BaseURL = resolveBaseURL(cfg.Server.BaseURL, cliCfg.BaseURL)
+
+	addressBeforeEnv := cfg.Server.Address
+	baseURLBeforeEnv := cfg.Server.BaseURL
+
+	var addressFromEnv bool
+	var baseURLFromEnv bool
+
+	userOnSet := envOptions.OnSet
+	envOptions.OnSet = func(tag string, value interface{}, isDefault bool) {
+		switch tag {
+		case "SERVER_ADDRESS":
+			addressFromEnv = true
+		case "BASE_URL":
+			baseURLFromEnv = true
 		}
-	} else {
-		log.Info().Msg("CLI flag -b not provided, using default BaseURL")
+
+		if userOnSet != nil {
+			userOnSet(tag, value, isDefault)
+		}
+	}
+
+	if err := env.ParseWithOptions(&cfg.Server, envOptions); err != nil {
+		return nil, err
+	}
+
+	if addressFromEnv {
+		if isValidAddress(cfg.Server.Address) {
+			log.Info().Str("Address", cfg.Server.Address).Msg("Overriding Address from environment")
+		} else {
+			log.Warn().Str("Address", cfg.Server.Address).Msg("Invalid Address from environment, falling back to CLI or default value")
+			cfg.Server.Address = addressBeforeEnv
+		}
+	}
+
+	if baseURLFromEnv {
+		if isValidURL(cfg.Server.BaseURL) {
+			log.Info().Str("BaseURL", cfg.Server.BaseURL).Msg("Overriding BaseURL from environment")
+		} else {
+			log.Warn().Str("BaseURL", cfg.Server.BaseURL).Msg("Invalid BaseURL from environment, falling back to CLI or default value")
+			cfg.Server.BaseURL = baseURLBeforeEnv
+		}
 	}
 
 	return cfg, nil
+}
+
+type cliConfig struct {
+	Address string
+	BaseURL string
+}
+
+func parseCLIArgs(args []string) (cliConfig, error) {
+	var cfg cliConfig
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		switch {
+		case arg == "--":
+			return cfg, nil
+		case arg == "-a":
+			if i+1 >= len(args) {
+				return cliConfig{}, fmt.Errorf("flag needs an argument: -a")
+			}
+			cfg.Address = args[i+1]
+			i++
+		case strings.HasPrefix(arg, "-a="):
+			cfg.Address = strings.TrimPrefix(arg, "-a=")
+		case arg == "-b":
+			if i+1 >= len(args) {
+				return cliConfig{}, fmt.Errorf("flag needs an argument: -b")
+			}
+			cfg.BaseURL = args[i+1]
+			i++
+		case strings.HasPrefix(arg, "-b="):
+			cfg.BaseURL = strings.TrimPrefix(arg, "-b=")
+		}
+	}
+
+	return cfg, nil
+}
+
+func resolveAddress(defaultValue, cliValue string) string {
+	if cliValue != "" {
+		if isValidAddress(cliValue) {
+			log.Info().Str("Address", cliValue).Msg("Overriding Address from CLI")
+			return cliValue
+		}
+		log.Warn().Str("Address", cliValue).Msg("Invalid CLI Address, using default value")
+	}
+
+	log.Info().Str("Address", defaultValue).Msg("Using default Address")
+	return defaultValue
+}
+
+func resolveBaseURL(defaultValue, cliValue string) string {
+	if cliValue != "" {
+		if isValidURL(cliValue) {
+			log.Info().Str("BaseURL", cliValue).Msg("Overriding BaseURL from CLI")
+			return cliValue
+		}
+		log.Warn().Str("BaseURL", cliValue).Msg("Invalid CLI BaseURL, using default value")
+	}
+
+	log.Info().Str("BaseURL", defaultValue).Msg("Using default BaseURL")
+	return defaultValue
 }
 
 // проверка корректности host:port
