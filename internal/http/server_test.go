@@ -2,6 +2,7 @@ package httpserver_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -212,4 +213,225 @@ func TestLoggingMiddlewareLogsImplicitStatusCode(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, buf.String(), `"status":200`)
+}
+
+func TestGzipRequestMiddlewareDecompressesRequestBody(t *testing.T) {
+	var requestBody string
+
+	createShortURLPlainTextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
+		requestBody = string(body)
+
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte("create"))
+	})
+
+	createShortURLJSONHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"result":"ok"}`))
+	})
+
+	redirectHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	})
+
+	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, redirectHandler)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(gzipData(t, "http://localhost:8080")))
+	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("Content-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusCreated, rec.Code)
+	assert.Equal(t, "http://localhost:8080", requestBody)
+}
+
+func TestGzipRequestMiddlewareReturnsBadRequestForUnsupportedEncoding(t *testing.T) {
+	createShortURLPlainTextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte("create"))
+	})
+
+	createShortURLJSONHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"result":"ok"}`))
+	})
+
+	redirectHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	})
+
+	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, redirectHandler)
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("body"))
+	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("Content-Encoding", "deflate")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, "bad request\n", rec.Body.String())
+}
+
+func TestGzipRequestMiddlewareReturnsBadRequestForBrokenGzip(t *testing.T) {
+	createShortURLPlainTextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte("create"))
+	})
+
+	createShortURLJSONHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"result":"ok"}`))
+	})
+
+	redirectHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	})
+
+	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, redirectHandler)
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("not-a-gzip-stream"))
+	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("Content-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, "bad request\n", rec.Body.String())
+}
+
+func TestGzipRequestMiddlewareReturnsBadRequestForMultipleEncodings(t *testing.T) {
+	createShortURLPlainTextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte("create"))
+	})
+
+	createShortURLJSONHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"result":"ok"}`))
+	})
+
+	redirectHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	})
+
+	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, redirectHandler)
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("body"))
+	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("Content-Encoding", "gzip, deflate")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, "bad request\n", rec.Body.String())
+}
+
+func TestGzipResponseMiddlewareCompressesJSONResponse(t *testing.T) {
+	createShortURLPlainTextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte("create"))
+	})
+
+	createShortURLJSONHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"result":"http://localhost:8080/abc123"}`))
+	})
+
+	redirectHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	})
+
+	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, redirectHandler)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(`{"url":"https://practicum.yandex.ru"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	res := rec.Result()
+	defer res.Body.Close()
+
+	assert.Equal(t, "gzip", res.Header.Get("Content-Encoding"))
+	assert.Contains(t, res.Header.Values("Vary"), "Accept-Encoding")
+	assert.Equal(t, `{"result":"http://localhost:8080/abc123"}`, ungzipBody(t, res.Body))
+}
+
+func TestGzipResponseMiddlewareSkipsUnsupportedContentType(t *testing.T) {
+	createShortURLPlainTextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte("create"))
+	})
+
+	createShortURLJSONHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"result":"ok"}`))
+	})
+
+	redirectHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	})
+
+	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, redirectHandler)
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("body"))
+	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	res := rec.Result()
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	assert.NoError(t, err)
+
+	assert.Empty(t, res.Header.Get("Content-Encoding"))
+	assert.Equal(t, "create", string(body))
+}
+
+func gzipData(t *testing.T, data string) []byte {
+	t.Helper()
+
+	var buf bytes.Buffer
+	writer := gzip.NewWriter(&buf)
+	_, err := writer.Write([]byte(data))
+	assert.NoError(t, err)
+	assert.NoError(t, writer.Close())
+
+	return buf.Bytes()
+}
+
+func ungzipBody(t *testing.T, body io.Reader) string {
+	t.Helper()
+
+	reader, err := gzip.NewReader(body)
+	assert.NoError(t, err)
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	assert.NoError(t, err)
+
+	return string(data)
 }

@@ -36,6 +36,8 @@ func NewRouter(createHandlerFunc, createJSONHandlerFunc, redirectHandlerFunc htt
 	r := chi.NewRouter()
 
 	r.Use(loggingMiddleware)
+	r.Use(gunzipRequestMiddleware)
+	r.Use(middleware.Compress(5, "application/json", "text/html"))
 	// --- Routes ---
 	r.Post("/", createHandlerFunc)
 	r.Post("/api/shorten", createJSONHandlerFunc)
