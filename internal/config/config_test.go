@@ -56,8 +56,8 @@ func TestLoadConfigPriority(t *testing.T) {
 			wantFileStoragePath: "/var/tmp/shortener.json",
 		},
 		{
-			имя:                 "игнорирует посторонние флаги при разборе поддерживаемых cli-флагов",
-			args:                []string{"-test.v=true", "-a=localhost:6060", "-b=http://localhost:6060", "-f=/tmp/storage.json"},
+			имя:                 "разбирает поддерживаемые cli-флаги в формате через равно",
+			args:                []string{"-a=localhost:6060", "-b=http://localhost:6060", "-f=/tmp/storage.json"},
 			wantAddress:         "localhost:6060",
 			wantBaseURL:         "http://localhost:6060",
 			wantFileStoragePath: "/tmp/storage.json",

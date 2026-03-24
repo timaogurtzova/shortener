@@ -1,11 +1,11 @@
 package config
 
 import (
-	"fmt"
+	"flag"
+	"io"
 	"net"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	env "github.com/caarlos0/env/v11"
@@ -18,17 +18,18 @@ type Configuration struct {
 }
 
 type ServerConfiguration struct {
-	Address      string        `env:"SERVER_ADDRESS"`
-	BaseURL      string        `env:"BASE_URL"`
-	IdleTimeout  time.Duration `env:"SERVER_IDLE_TIMEOUT"`
-	ReadTimeout  time.Duration `env:"SERVER_READ_TIMEOUT"`
-	WriteTimeout time.Duration `env:"SERVER_WRITE_TIMEOUT"`
+	Address      string
+	BaseURL      string
+	IdleTimeout  time.Duration
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
 }
 
 type StorageConfiguration struct {
-	FileStoragePath string `env:"FILE_STORAGE_PATH"`
+	FileStoragePath string
 }
 
+// defaultConfig возвращает конфигурацию со значениями по умолчанию.
 func defaultConfig() *Configuration {
 	return &Configuration{
 		Server: ServerConfiguration{
@@ -44,11 +45,13 @@ func defaultConfig() *Configuration {
 	}
 }
 
+// LoadConfig загружает конфигурацию из аргументов текущего процесса и переменных окружения.
 func LoadConfig() (*Configuration, error) {
-	return loadConfig(os.Args[1:], env.Options{})
+	return loadConfig(os.Args[1:])
 }
 
-func loadConfig(args []string, envOptions env.Options) (*Configuration, error) {
+// loadConfig собирает конфигурацию с приоритетом окружение > флаги > значения по умолчанию.
+func loadConfig(args []string) (*Configuration, error) {
 	cfg := defaultConfig()
 
 	cliCfg, err := parseCLIArgs(args)
@@ -56,66 +59,14 @@ func loadConfig(args []string, envOptions env.Options) (*Configuration, error) {
 		return nil, err
 	}
 
-	cfg.Server.Address = resolveAddress(cfg.Server.Address, cliCfg.Address)
-	cfg.Server.BaseURL = resolveBaseURL(cfg.Server.BaseURL, cliCfg.BaseURL)
-	cfg.Storage.FileStoragePath = resolveFileStoragePath(cfg.Storage.FileStoragePath, cliCfg.FileStoragePath)
+	applyCLIConfig(cfg, cliCfg)
 
-	addressBeforeEnv := cfg.Server.Address
-	baseURLBeforeEnv := cfg.Server.BaseURL
-	fileStoragePathBeforeEnv := cfg.Storage.FileStoragePath
-
-	var addressFromEnv bool
-	var baseURLFromEnv bool
-	var fileStoragePathFromEnv bool
-
-	userOnSet := envOptions.OnSet
-	envOptions.OnSet = func(tag string, value interface{}, isDefault bool) {
-		switch tag {
-		case "SERVER_ADDRESS":
-			addressFromEnv = true
-		case "BASE_URL":
-			baseURLFromEnv = true
-		case "FILE_STORAGE_PATH":
-			fileStoragePathFromEnv = true
-		}
-
-		if userOnSet != nil {
-			userOnSet(tag, value, isDefault)
-		}
-	}
-
-	if err := env.ParseWithOptions(&cfg.Server, envOptions); err != nil {
-		return nil, err
-	}
-	if err := env.ParseWithOptions(&cfg.Storage, envOptions); err != nil {
+	envCfg, err := env.ParseAsWithOptions[envConfig](env.Options{})
+	if err != nil {
 		return nil, err
 	}
 
-	if addressFromEnv {
-		if isValidAddress(cfg.Server.Address) {
-			log.Info().Str("Address", cfg.Server.Address).Msg("Overriding Address from environment")
-		} else {
-			log.Warn().Str("Address", cfg.Server.Address).Msg("Invalid Address from environment, falling back to CLI or default value")
-			cfg.Server.Address = addressBeforeEnv
-		}
-	}
-
-	if baseURLFromEnv {
-		if isValidURL(cfg.Server.BaseURL) {
-			log.Info().Str("BaseURL", cfg.Server.BaseURL).Msg("Overriding BaseURL from environment")
-		} else {
-			log.Warn().Str("BaseURL", cfg.Server.BaseURL).Msg("Invalid BaseURL from environment, falling back to CLI or default value")
-			cfg.Server.BaseURL = baseURLBeforeEnv
-		}
-	}
-	if fileStoragePathFromEnv {
-		if cfg.Storage.FileStoragePath != "" {
-			log.Info().Str("FileStoragePath", cfg.Storage.FileStoragePath).Msg("Overriding FileStoragePath from environment")
-		} else {
-			log.Warn().Str("FileStoragePath", cfg.Storage.FileStoragePath).Msg("Empty FileStoragePath from environment, falling back to CLI or default value")
-			cfg.Storage.FileStoragePath = fileStoragePathBeforeEnv
-		}
-	}
+	applyEnvConfig(cfg, envCfg)
 
 	return cfg, nil
 }
@@ -126,45 +77,89 @@ type cliConfig struct {
 	FileStoragePath string
 }
 
+// envConfig хранит только значения, явно заданные в переменных окружения.
+type envConfig struct {
+	Address         *string        `env:"SERVER_ADDRESS"`
+	BaseURL         *string        `env:"BASE_URL"`
+	IdleTimeout     *time.Duration `env:"SERVER_IDLE_TIMEOUT"`
+	ReadTimeout     *time.Duration `env:"SERVER_READ_TIMEOUT"`
+	WriteTimeout    *time.Duration `env:"SERVER_WRITE_TIMEOUT"`
+	FileStoragePath *string        `env:"FILE_STORAGE_PATH"`
+}
+
+// parseCLIArgs разбирает флаги конфигурации из аргументов командной строки.
 func parseCLIArgs(args []string) (cliConfig, error) {
 	var cfg cliConfig
 
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
+	fs := flag.NewFlagSet("shortener", flag.ContinueOnError)
 
-		switch {
-		case arg == "--":
-			return cfg, nil
-		case arg == "-a":
-			if i+1 >= len(args) {
-				return cliConfig{}, fmt.Errorf("flag needs an argument: -a")
-			}
-			cfg.Address = args[i+1]
-			i++
-		case strings.HasPrefix(arg, "-a="):
-			cfg.Address = strings.TrimPrefix(arg, "-a=")
-		case arg == "-b":
-			if i+1 >= len(args) {
-				return cliConfig{}, fmt.Errorf("flag needs an argument: -b")
-			}
-			cfg.BaseURL = args[i+1]
-			i++
-		case strings.HasPrefix(arg, "-b="):
-			cfg.BaseURL = strings.TrimPrefix(arg, "-b=")
-		case arg == "-f":
-			if i+1 >= len(args) {
-				return cliConfig{}, fmt.Errorf("flag needs an argument: -f")
-			}
-			cfg.FileStoragePath = args[i+1]
-			i++
-		case strings.HasPrefix(arg, "-f="):
-			cfg.FileStoragePath = strings.TrimPrefix(arg, "-f=")
-		}
+	// Подавляем вывод стандартного парсера, чтобы управлять ошибками самостоятельно.
+	fs.SetOutput(io.Discard)
+
+	fs.StringVar(&cfg.Address, "a", "", "server address")
+	fs.StringVar(&cfg.BaseURL, "b", "", "base url")
+	fs.StringVar(&cfg.FileStoragePath, "f", "", "file storage path")
+
+	if err := fs.Parse(args); err != nil {
+		return cliConfig{}, err
 	}
 
 	return cfg, nil
 }
 
+// applyCLIConfig применяет значения из флагов поверх конфигурации по умолчанию.
+func applyCLIConfig(cfg *Configuration, cliCfg cliConfig) {
+	cfg.Server.Address = resolveAddress(cfg.Server.Address, cliCfg.Address)
+	cfg.Server.BaseURL = resolveBaseURL(cfg.Server.BaseURL, cliCfg.BaseURL)
+	cfg.Storage.FileStoragePath = resolveFileStoragePath(cfg.Storage.FileStoragePath, cliCfg.FileStoragePath)
+}
+
+// applyEnvConfig применяет значения из переменных окружения поверх уже собранной конфигурации.
+func applyEnvConfig(cfg *Configuration, envCfg envConfig) {
+	if envCfg.Address != nil {
+		if isValidAddress(*envCfg.Address) {
+			cfg.Server.Address = *envCfg.Address
+			log.Info().Str("Address", *envCfg.Address).Msg("Overriding Address from environment")
+		} else {
+			log.Warn().Str("Address", *envCfg.Address).Msg("Invalid Address from environment, using previous value")
+		}
+	}
+
+	if envCfg.BaseURL != nil {
+		if isValidURL(*envCfg.BaseURL) {
+			cfg.Server.BaseURL = *envCfg.BaseURL
+			log.Info().Str("BaseURL", *envCfg.BaseURL).Msg("Overriding BaseURL from environment")
+		} else {
+			log.Warn().Str("BaseURL", *envCfg.BaseURL).Msg("Invalid BaseURL from environment, using previous value")
+		}
+	}
+
+	if envCfg.IdleTimeout != nil {
+		cfg.Server.IdleTimeout = *envCfg.IdleTimeout
+		log.Info().Dur("IdleTimeout", *envCfg.IdleTimeout).Msg("Overriding IdleTimeout from environment")
+	}
+
+	if envCfg.ReadTimeout != nil {
+		cfg.Server.ReadTimeout = *envCfg.ReadTimeout
+		log.Info().Dur("ReadTimeout", *envCfg.ReadTimeout).Msg("Overriding ReadTimeout from environment")
+	}
+
+	if envCfg.WriteTimeout != nil {
+		cfg.Server.WriteTimeout = *envCfg.WriteTimeout
+		log.Info().Dur("WriteTimeout", *envCfg.WriteTimeout).Msg("Overriding WriteTimeout from environment")
+	}
+
+	if envCfg.FileStoragePath != nil {
+		if *envCfg.FileStoragePath != "" {
+			cfg.Storage.FileStoragePath = *envCfg.FileStoragePath
+			log.Info().Str("FileStoragePath", *envCfg.FileStoragePath).Msg("Overriding FileStoragePath from environment")
+		} else {
+			log.Warn().Msg("Empty FileStoragePath from environment, using previous value")
+		}
+	}
+}
+
+// resolveAddress выбирает адрес сервера из флагов или оставляет значение по умолчанию.
 func resolveAddress(defaultValue, cliValue string) string {
 	if cliValue != "" {
 		if isValidAddress(cliValue) {
@@ -178,6 +173,7 @@ func resolveAddress(defaultValue, cliValue string) string {
 	return defaultValue
 }
 
+// resolveBaseURL выбирает базовый URL из флагов или оставляет значение по умолчанию.
 func resolveBaseURL(defaultValue, cliValue string) string {
 	if cliValue != "" {
 		if isValidURL(cliValue) {
@@ -191,6 +187,7 @@ func resolveBaseURL(defaultValue, cliValue string) string {
 	return defaultValue
 }
 
+// resolveFileStoragePath выбирает путь к файлу хранилища из флагов или оставляет значение по умолчанию.
 func resolveFileStoragePath(defaultValue, cliValue string) string {
 	if cliValue != "" {
 		log.Info().Str("FileStoragePath", cliValue).Msg("Overriding FileStoragePath from CLI")
@@ -201,13 +198,13 @@ func resolveFileStoragePath(defaultValue, cliValue string) string {
 	return defaultValue
 }
 
-// проверка корректности host:port
+// isValidAddress проверяет, что адрес имеет формат host:port.
 func isValidAddress(addr string) bool {
 	_, err := net.ResolveTCPAddr("tcp", addr)
 	return err == nil
 }
 
-// Проверка корректности URL
+// isValidURL проверяет корректность URL.
 func isValidURL(raw string) bool {
 	u, err := url.Parse(raw)
 	return err == nil && u.Scheme != "" && u.Host != ""
