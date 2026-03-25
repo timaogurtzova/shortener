@@ -2,24 +2,34 @@ package config
 
 import (
 	"flag"
+	"io"
 	"net"
 	"net/url"
+	"os"
 	"time"
 
+	env "github.com/caarlos0/env/v11"
 	"github.com/rs/zerolog/log"
 )
 
 type Configuration struct {
-	Server ServerConfiguration `yaml:"server"`
-}
-type ServerConfiguration struct {
-	Address      string        `yaml:"address"`
-	BaseURL      string        `yaml:"base_url"`
-	IdleTimeout  time.Duration `yaml:"idle_timeout"`
-	ReadTimeout  time.Duration `yaml:"read_timeout"`
-	WriteTimeout time.Duration `yaml:"write_timeout"`
+	Server  ServerConfiguration
+	Storage StorageConfiguration
 }
 
+type ServerConfiguration struct {
+	Address      string
+	BaseURL      string
+	IdleTimeout  time.Duration
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+}
+
+type StorageConfiguration struct {
+	FileStoragePath string
+}
+
+// defaultConfig возвращает конфигурацию со значениями по умолчанию.
 func defaultConfig() *Configuration {
 	return &Configuration{
 		Server: ServerConfiguration{
@@ -29,50 +39,172 @@ func defaultConfig() *Configuration {
 			ReadTimeout:  60 * time.Second,
 			WriteTimeout: 60 * time.Second,
 		},
+		Storage: StorageConfiguration{
+			FileStoragePath: "storage.json",
+		},
 	}
 }
 
+// LoadConfig загружает конфигурацию из аргументов текущего процесса и переменных окружения.
 func LoadConfig() (*Configuration, error) {
+	return loadConfig(os.Args[1:])
+}
+
+// loadConfig собирает конфигурацию с приоритетом окружение > флаги > значения по умолчанию.
+func loadConfig(args []string) (*Configuration, error) {
 	cfg := defaultConfig()
 
-	// Аргументы командной строки
-	cliAddr := flag.String("a", "", "Address for HTTP server (host:port)")
-	cliBaseURL := flag.String("b", "", "Base URL for short links")
-	flag.Parse()
-
-	// Переопределяем значения, если флаги заданы и они корректные
-	if *cliAddr != "" {
-		if isValidAddress(*cliAddr) {
-			cfg.Server.Address = *cliAddr
-			log.Info().Str("Address", *cliAddr).Msg("Overriding Address from CLI")
-		} else {
-			log.Warn().Str("Address", *cliAddr).Msg("Invalid CLI Address, using YAML value")
-		}
-	} else {
-		log.Info().Msg("CLI flag -a not provided, using default Address")
+	cliCfg, err := parseCLIArgs(args)
+	if err != nil {
+		return nil, err
 	}
 
-	if *cliBaseURL != "" {
-		if isValidURL(*cliBaseURL) {
-			cfg.Server.BaseURL = *cliBaseURL
-			log.Info().Str("BaseURL", *cliBaseURL).Msg("Overriding BaseURL from CLI")
-		} else {
-			log.Warn().Str("BaseURL", *cliBaseURL).Msg("Invalid CLI BaseURL, using YAML value")
-		}
-	} else {
-		log.Info().Msg("CLI flag -b not provided, using default BaseURL")
+	applyCLIConfig(cfg, cliCfg)
+
+	envCfg, err := env.ParseAsWithOptions[envConfig](env.Options{})
+	if err != nil {
+		return nil, err
+	}
+
+	applyEnvConfig(cfg, envCfg)
+
+	return cfg, nil
+}
+
+type cliConfig struct {
+	Address         string
+	BaseURL         string
+	FileStoragePath string
+}
+
+// envConfig хранит только значения, явно заданные в переменных окружения.
+type envConfig struct {
+	Address         *string        `env:"SERVER_ADDRESS"`
+	BaseURL         *string        `env:"BASE_URL"`
+	IdleTimeout     *time.Duration `env:"SERVER_IDLE_TIMEOUT"`
+	ReadTimeout     *time.Duration `env:"SERVER_READ_TIMEOUT"`
+	WriteTimeout    *time.Duration `env:"SERVER_WRITE_TIMEOUT"`
+	FileStoragePath *string        `env:"FILE_STORAGE_PATH"`
+}
+
+// parseCLIArgs разбирает флаги конфигурации из аргументов командной строки.
+func parseCLIArgs(args []string) (cliConfig, error) {
+	var cfg cliConfig
+
+	fs := flag.NewFlagSet("shortener", flag.ContinueOnError)
+
+	// Подавляем вывод стандартного парсера, чтобы управлять ошибками самостоятельно.
+	fs.SetOutput(io.Discard)
+
+	fs.StringVar(&cfg.Address, "a", "", "server address")
+	fs.StringVar(&cfg.BaseURL, "b", "", "base url")
+	fs.StringVar(&cfg.FileStoragePath, "f", "", "file storage path")
+
+	if err := fs.Parse(args); err != nil {
+		return cliConfig{}, err
 	}
 
 	return cfg, nil
 }
 
-// проверка корректности host:port
+// applyCLIConfig применяет значения из флагов поверх конфигурации по умолчанию.
+func applyCLIConfig(cfg *Configuration, cliCfg cliConfig) {
+	cfg.Server.Address = resolveAddress(cfg.Server.Address, cliCfg.Address)
+	cfg.Server.BaseURL = resolveBaseURL(cfg.Server.BaseURL, cliCfg.BaseURL)
+	cfg.Storage.FileStoragePath = resolveFileStoragePath(cfg.Storage.FileStoragePath, cliCfg.FileStoragePath)
+}
+
+// applyEnvConfig применяет значения из переменных окружения поверх уже собранной конфигурации.
+func applyEnvConfig(cfg *Configuration, envCfg envConfig) {
+	if envCfg.Address != nil {
+		if isValidAddress(*envCfg.Address) {
+			cfg.Server.Address = *envCfg.Address
+			log.Info().Str("Address", *envCfg.Address).Msg("Overriding Address from environment")
+		} else {
+			log.Warn().Str("Address", *envCfg.Address).Msg("Invalid Address from environment, using previous value")
+		}
+	}
+
+	if envCfg.BaseURL != nil {
+		if isValidURL(*envCfg.BaseURL) {
+			cfg.Server.BaseURL = *envCfg.BaseURL
+			log.Info().Str("BaseURL", *envCfg.BaseURL).Msg("Overriding BaseURL from environment")
+		} else {
+			log.Warn().Str("BaseURL", *envCfg.BaseURL).Msg("Invalid BaseURL from environment, using previous value")
+		}
+	}
+
+	if envCfg.IdleTimeout != nil {
+		cfg.Server.IdleTimeout = *envCfg.IdleTimeout
+		log.Info().Dur("IdleTimeout", *envCfg.IdleTimeout).Msg("Overriding IdleTimeout from environment")
+	}
+
+	if envCfg.ReadTimeout != nil {
+		cfg.Server.ReadTimeout = *envCfg.ReadTimeout
+		log.Info().Dur("ReadTimeout", *envCfg.ReadTimeout).Msg("Overriding ReadTimeout from environment")
+	}
+
+	if envCfg.WriteTimeout != nil {
+		cfg.Server.WriteTimeout = *envCfg.WriteTimeout
+		log.Info().Dur("WriteTimeout", *envCfg.WriteTimeout).Msg("Overriding WriteTimeout from environment")
+	}
+
+	if envCfg.FileStoragePath != nil {
+		if *envCfg.FileStoragePath != "" {
+			cfg.Storage.FileStoragePath = *envCfg.FileStoragePath
+			log.Info().Str("FileStoragePath", *envCfg.FileStoragePath).Msg("Overriding FileStoragePath from environment")
+		} else {
+			log.Warn().Msg("Empty FileStoragePath from environment, using previous value")
+		}
+	}
+}
+
+// resolveAddress выбирает адрес сервера из флагов или оставляет значение по умолчанию.
+func resolveAddress(defaultValue, cliValue string) string {
+	if cliValue != "" {
+		if isValidAddress(cliValue) {
+			log.Info().Str("Address", cliValue).Msg("Overriding Address from CLI")
+			return cliValue
+		}
+		log.Warn().Str("Address", cliValue).Msg("Invalid CLI Address, using default value")
+	}
+
+	log.Info().Str("Address", defaultValue).Msg("Using default Address")
+	return defaultValue
+}
+
+// resolveBaseURL выбирает базовый URL из флагов или оставляет значение по умолчанию.
+func resolveBaseURL(defaultValue, cliValue string) string {
+	if cliValue != "" {
+		if isValidURL(cliValue) {
+			log.Info().Str("BaseURL", cliValue).Msg("Overriding BaseURL from CLI")
+			return cliValue
+		}
+		log.Warn().Str("BaseURL", cliValue).Msg("Invalid CLI BaseURL, using default value")
+	}
+
+	log.Info().Str("BaseURL", defaultValue).Msg("Using default BaseURL")
+	return defaultValue
+}
+
+// resolveFileStoragePath выбирает путь к файлу хранилища из флагов или оставляет значение по умолчанию.
+func resolveFileStoragePath(defaultValue, cliValue string) string {
+	if cliValue != "" {
+		log.Info().Str("FileStoragePath", cliValue).Msg("Overriding FileStoragePath from CLI")
+		return cliValue
+	}
+
+	log.Info().Str("FileStoragePath", defaultValue).Msg("Using default FileStoragePath")
+	return defaultValue
+}
+
+// isValidAddress проверяет, что адрес имеет формат host:port.
 func isValidAddress(addr string) bool {
 	_, err := net.ResolveTCPAddr("tcp", addr)
 	return err == nil
 }
 
-// Проверка корректности URL
+// isValidURL проверяет корректность URL.
 func isValidURL(raw string) bool {
 	u, err := url.Parse(raw)
 	return err == nil && u.Scheme != "" && u.Host != ""

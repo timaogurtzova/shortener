@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog/log"
 	"github.com/timaogurtzova/shortener/internal/config"
+	httpmiddleware "github.com/timaogurtzova/shortener/internal/http/middleware"
 )
 
 type Server struct {
@@ -31,12 +33,15 @@ func NewServer(cfg *config.Configuration, router http.Handler) *Server {
 	}
 }
 
-func NewRouter(createHandlerFunc, redirectHandlerFunc http.HandlerFunc) http.Handler {
+func NewRouter(createHandlerFunc, createJSONHandlerFunc, redirectHandlerFunc http.HandlerFunc) http.Handler {
 	r := chi.NewRouter()
 
-	r.Use(loggingMiddleware)
+	r.Use(httpmiddleware.Logging)
+	r.Use(httpmiddleware.GunzipRequest)
+	r.Use(chimiddleware.Compress(5, "application/json", "text/html"))
 	// --- Routes ---
 	r.Post("/", createHandlerFunc)
+	r.Post("/api/shorten", createJSONHandlerFunc)
 	r.Get("/{id}", redirectHandlerFunc)
 
 	// --- Fallback ---
@@ -49,17 +54,6 @@ func NewRouter(createHandlerFunc, redirectHandlerFunc http.HandlerFunc) http.Han
 	})
 
 	return r
-}
-
-// --- Middleware для логирования ---
-func loggingMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Info().
-			Str("method", r.Method).
-			Str("url", r.URL.String()).
-			Msg("Incoming request")
-		next.ServeHTTP(w, r)
-	})
 }
 
 // Run

@@ -1,6 +1,7 @@
 package handler_test
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -14,7 +15,7 @@ import (
 	"github.com/timaogurtzova/shortener/internal/service"
 )
 
-func TestCreateHandler(t *testing.T) {
+func TestCreateShortURLPlainTextHandler(t *testing.T) {
 	type want struct {
 		code        int
 		response    string
@@ -110,7 +111,7 @@ func TestCreateHandler(t *testing.T) {
 			req.Host = "localhost:8080"
 			rec := httptest.NewRecorder()
 
-			h.Create(rec, req)
+			h.CreateShortURLPlainText(rec, req)
 
 			res := rec.Result()
 			defer res.Body.Close()
@@ -124,6 +125,135 @@ func TestCreateHandler(t *testing.T) {
 			assert.Equal(t, test.want.response, string(body))
 
 			// Проверяем Content-Type
+			assert.Equal(t, test.want.contentType, res.Header.Get("Content-Type"))
+		})
+	}
+}
+
+func TestCreateShortURLJSONHandler(t *testing.T) {
+	type want struct {
+		code        int
+		response    string
+		contentType string
+	}
+
+	tests := []struct {
+		name        string
+		method      string
+		contentType string
+		body        string
+		mock        func() *mockURLShortener
+		want        want
+	}{
+		{
+			name:        "успешное создание через json",
+			method:      http.MethodPost,
+			body:        `{"url":"https://practicum.yandex.ru"}`,
+			contentType: "application/json",
+			mock: func() *mockURLShortener {
+				return &mockURLShortener{
+					CreateMockFunc: func(url string) (string, error) {
+						return "abc123", nil
+					},
+				}
+			},
+			want: want{
+				code:        http.StatusCreated,
+				response:    `{"result":"http://localhost:8080/abc123"}`,
+				contentType: "application/json",
+			},
+		},
+		{
+			name:        "неправильный Content-Type",
+			method:      http.MethodPost,
+			body:        `{"url":"https://practicum.yandex.ru"}`,
+			contentType: "text/plain",
+			want: want{
+				code:        http.StatusBadRequest,
+				response:    "bad request\n",
+				contentType: "text/plain; charset=utf-8",
+			},
+		},
+		{
+			name:        "пустой url в json",
+			method:      http.MethodPost,
+			body:        `{"url":"   "}`,
+			contentType: "application/json",
+			want: want{
+				code:        http.StatusBadRequest,
+				response:    "bad request: empty body\n",
+				contentType: "text/plain; charset=utf-8",
+			},
+		},
+		{
+			name:        "невалидный json",
+			method:      http.MethodPost,
+			body:        `{"url":`,
+			contentType: "application/json",
+			want: want{
+				code:        http.StatusBadRequest,
+				response:    "bad request\n",
+				contentType: "text/plain; charset=utf-8",
+			},
+		},
+		{
+			name:        "ошибка сервиса",
+			method:      http.MethodPost,
+			body:        `{"url":"https://practicum.yandex.ru"}`,
+			contentType: "application/json",
+			mock: func() *mockURLShortener {
+				return &mockURLShortener{
+					CreateMockFunc: func(url string) (string, error) {
+						return "", errors.New("service error")
+					},
+				}
+			},
+			want: want{
+				code:        http.StatusInternalServerError,
+				response:    "internal server error\n",
+				contentType: "text/plain; charset=utf-8",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var svc service.URLShortener
+			if test.mock != nil {
+				svc = test.mock()
+			} else {
+				svc = &mockURLShortener{
+					CreateMockFunc: func(url string) (string, error) { return "", nil },
+				}
+			}
+
+			h := handler.NewCreateHandler(svc, "http://localhost:8080")
+
+			req := httptest.NewRequest(test.method, "/api/shorten", strings.NewReader(test.body))
+			req.Header.Set("Content-Type", test.contentType)
+			rec := httptest.NewRecorder()
+
+			h.CreateShortURLJSON(rec, req)
+
+			res := rec.Result()
+			defer res.Body.Close()
+
+			assert.Equal(t, test.want.code, res.StatusCode)
+
+			body, err := io.ReadAll(res.Body)
+			require.NoError(t, err)
+
+			if test.want.contentType == "application/json" {
+				var actual map[string]string
+				require.NoError(t, json.Unmarshal(body, &actual))
+
+				var expected map[string]string
+				require.NoError(t, json.Unmarshal([]byte(test.want.response), &expected))
+				assert.Equal(t, expected, actual)
+			} else {
+				assert.Equal(t, test.want.response, string(body))
+			}
+
 			assert.Equal(t, test.want.contentType, res.Header.Get("Content-Type"))
 		})
 	}

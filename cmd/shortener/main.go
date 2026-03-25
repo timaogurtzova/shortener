@@ -17,13 +17,17 @@ func main() {
 		return
 	}
 	//Repository
-	repo := repository.NewInMemoryStore()
+	repo, err := repository.NewFileStore(cfg.Storage.FileStoragePath)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Error initializing file storage")
+		return
+	}
 	//Service
 	svc := service.NewShortenerService(repo)
 	//Handlers
 	createHandler := handler.NewCreateHandler(svc, cfg.Server.BaseURL)
 	redirectHandler := handler.NewRedirectHandler(svc)
-	router := httpserver.NewRouter(createHandler.Create, redirectHandler.Redirect)
+	router := httpserver.NewRouter(createHandler.CreateShortURLPlainText, createHandler.CreateShortURLJSON, redirectHandler.Redirect)
 	// HTTP server
 	server := httpserver.NewServer(cfg, router)
 	if err := server.Run(); err != nil {
