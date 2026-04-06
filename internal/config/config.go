@@ -13,8 +13,9 @@ import (
 )
 
 type Configuration struct {
-	Server  ServerConfiguration
-	Storage StorageConfiguration
+	Server   ServerConfiguration
+	Storage  StorageConfiguration
+	Database DatabaseConfiguration
 }
 
 type ServerConfiguration struct {
@@ -29,6 +30,10 @@ type StorageConfiguration struct {
 	FileStoragePath string
 }
 
+type DatabaseConfiguration struct {
+	DSN string
+}
+
 // defaultConfig возвращает конфигурацию со значениями по умолчанию.
 func defaultConfig() *Configuration {
 	return &Configuration{
@@ -41,6 +46,9 @@ func defaultConfig() *Configuration {
 		},
 		Storage: StorageConfiguration{
 			FileStoragePath: "storage.json",
+		},
+		Database: DatabaseConfiguration{
+			DSN: "",
 		},
 	}
 }
@@ -75,6 +83,7 @@ type cliConfig struct {
 	Address         string
 	BaseURL         string
 	FileStoragePath string
+	DatabaseDSN     string
 }
 
 // envConfig хранит только значения, явно заданные в переменных окружения.
@@ -85,6 +94,7 @@ type envConfig struct {
 	ReadTimeout     *time.Duration `env:"SERVER_READ_TIMEOUT"`
 	WriteTimeout    *time.Duration `env:"SERVER_WRITE_TIMEOUT"`
 	FileStoragePath *string        `env:"FILE_STORAGE_PATH"`
+	DatabaseDSN     *string        `env:"DATABASE_DSN"`
 }
 
 // parseCLIArgs разбирает флаги конфигурации из аргументов командной строки.
@@ -99,6 +109,7 @@ func parseCLIArgs(args []string) (cliConfig, error) {
 	fs.StringVar(&cfg.Address, "a", "", "server address")
 	fs.StringVar(&cfg.BaseURL, "b", "", "base url")
 	fs.StringVar(&cfg.FileStoragePath, "f", "", "file storage path")
+	fs.StringVar(&cfg.DatabaseDSN, "d", "", "database dsn")
 
 	if err := fs.Parse(args); err != nil {
 		return cliConfig{}, err
@@ -112,6 +123,7 @@ func applyCLIConfig(cfg *Configuration, cliCfg cliConfig) {
 	cfg.Server.Address = resolveAddress(cfg.Server.Address, cliCfg.Address)
 	cfg.Server.BaseURL = resolveBaseURL(cfg.Server.BaseURL, cliCfg.BaseURL)
 	cfg.Storage.FileStoragePath = resolveFileStoragePath(cfg.Storage.FileStoragePath, cliCfg.FileStoragePath)
+	cfg.Database.DSN = resolveDatabaseDSN(cfg.Database.DSN, cliCfg.DatabaseDSN)
 }
 
 // applyEnvConfig применяет значения из переменных окружения поверх уже собранной конфигурации.
@@ -157,6 +169,15 @@ func applyEnvConfig(cfg *Configuration, envCfg envConfig) {
 			log.Warn().Msg("Empty FileStoragePath from environment, using previous value")
 		}
 	}
+
+	if envCfg.DatabaseDSN != nil {
+		if *envCfg.DatabaseDSN != "" {
+			cfg.Database.DSN = *envCfg.DatabaseDSN
+			log.Info().Str("DatabaseDSN", *envCfg.DatabaseDSN).Msg("Overriding DatabaseDSN from environment")
+		} else {
+			log.Warn().Msg("Empty DatabaseDSN from environment, using previous value")
+		}
+	}
 }
 
 // resolveAddress выбирает адрес сервера из флагов или оставляет значение по умолчанию.
@@ -195,6 +216,17 @@ func resolveFileStoragePath(defaultValue, cliValue string) string {
 	}
 
 	log.Info().Str("FileStoragePath", defaultValue).Msg("Using default FileStoragePath")
+	return defaultValue
+}
+
+// resolveDatabaseDSN выбирает DSN базы данных из флагов или оставляет значение по умолчанию.
+func resolveDatabaseDSN(defaultValue, cliValue string) string {
+	if cliValue != "" {
+		log.Info().Str("DatabaseDSN", cliValue).Msg("Overriding DatabaseDSN from CLI")
+		return cliValue
+	}
+
+	log.Info().Str("DatabaseDSN", defaultValue).Msg("Using default DatabaseDSN")
 	return defaultValue
 }
 

@@ -18,19 +18,22 @@ func TestLoadConfigPriority(t *testing.T) {
 		wantAddress         string
 		wantBaseURL         string
 		wantFileStoragePath string
+		wantDatabaseDSN     string
 	}{
 		{
 			имя:                 "использует значения по умолчанию, когда нет env и флагов",
 			wantAddress:         "localhost:8080",
 			wantBaseURL:         "http://localhost:8080",
 			wantFileStoragePath: "storage.json",
+			wantDatabaseDSN:     "",
 		},
 		{
 			имя:                 "использует флаги, когда env отсутствуют",
-			args:                []string{"-a", "localhost:9090", "-b", "http://localhost:9090", "-f", "/tmp/shortener.json"},
+			args:                []string{"-a", "localhost:9090", "-b", "http://localhost:9090", "-f", "/tmp/shortener.json", "-d", "postgres://shortener:secret@localhost:5432/shortener?sslmode=disable"},
 			wantAddress:         "localhost:9090",
 			wantBaseURL:         "http://localhost:9090",
 			wantFileStoragePath: "/tmp/shortener.json",
+			wantDatabaseDSN:     "postgres://shortener:secret@localhost:5432/shortener?sslmode=disable",
 		},
 		{
 			имя: "использует переменные окружения, когда флаги отсутствуют",
@@ -38,29 +41,34 @@ func TestLoadConfigPriority(t *testing.T) {
 				"SERVER_ADDRESS":    "localhost:7070",
 				"BASE_URL":          "http://localhost:7070",
 				"FILE_STORAGE_PATH": "/var/tmp/shortener.json",
+				"DATABASE_DSN":      "postgres://env:secret@localhost:5432/envdb?sslmode=disable",
 			},
 			wantAddress:         "localhost:7070",
 			wantBaseURL:         "http://localhost:7070",
 			wantFileStoragePath: "/var/tmp/shortener.json",
+			wantDatabaseDSN:     "postgres://env:secret@localhost:5432/envdb?sslmode=disable",
 		},
 		{
 			имя:  "переменные окружения имеют приоритет над флагами",
-			args: []string{"-a", "localhost:9090", "-b", "http://localhost:9090", "-f", "/tmp/shortener.json"},
+			args: []string{"-a", "localhost:9090", "-b", "http://localhost:9090", "-f", "/tmp/shortener.json", "-d", "postgres://flag:secret@localhost:5432/flagdb?sslmode=disable"},
 			env: map[string]string{
 				"SERVER_ADDRESS":    "localhost:7070",
 				"BASE_URL":          "http://localhost:7070",
 				"FILE_STORAGE_PATH": "/var/tmp/shortener.json",
+				"DATABASE_DSN":      "postgres://env:secret@localhost:5432/envdb?sslmode=disable",
 			},
 			wantAddress:         "localhost:7070",
 			wantBaseURL:         "http://localhost:7070",
 			wantFileStoragePath: "/var/tmp/shortener.json",
+			wantDatabaseDSN:     "postgres://env:secret@localhost:5432/envdb?sslmode=disable",
 		},
 		{
 			имя:                 "разбирает поддерживаемые cli-флаги в формате через равно",
-			args:                []string{"-a=localhost:6060", "-b=http://localhost:6060", "-f=/tmp/storage.json"},
+			args:                []string{"-a=localhost:6060", "-b=http://localhost:6060", "-f=/tmp/storage.json", "-d=postgres://shortener:secret@localhost:5432/shortener?sslmode=disable"},
 			wantAddress:         "localhost:6060",
 			wantBaseURL:         "http://localhost:6060",
 			wantFileStoragePath: "/tmp/storage.json",
+			wantDatabaseDSN:     "postgres://shortener:secret@localhost:5432/shortener?sslmode=disable",
 		},
 	}
 
@@ -72,6 +80,7 @@ func TestLoadConfigPriority(t *testing.T) {
 			assert.Equal(t, tt.wantAddress, cfg.Server.Address)
 			assert.Equal(t, tt.wantBaseURL, cfg.Server.BaseURL)
 			assert.Equal(t, tt.wantFileStoragePath, cfg.Storage.FileStoragePath)
+			assert.Equal(t, tt.wantDatabaseDSN, cfg.Database.DSN)
 		})
 	}
 }
@@ -119,6 +128,7 @@ func loadWithState(t *testing.T, args []string, envVars map[string]string) (*con
 		"SERVER_READ_TIMEOUT",
 		"SERVER_WRITE_TIMEOUT",
 		"FILE_STORAGE_PATH",
+		"DATABASE_DSN",
 	} {
 		previousValue, wasSet := os.LookupEnv(key)
 
