@@ -5,6 +5,7 @@ import "context"
 // URLShortener описывает контракт сервиса сокращения URL для HTTP-обработчиков.
 type URLShortener interface {
 	Create(string) (string, error)
+	CreateBatch([]string) ([]string, error)
 	Resolve(string) (string, error)
 }
 

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/timaogurtzova/shortener/internal/repository"
 	"github.com/timaogurtzova/shortener/internal/service"
 )
 
@@ -86,6 +87,62 @@ func TestShortenerService_Resolve(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.wantURL, url)
+			}
+		})
+	}
+}
+
+func TestShortenerService_CreateBatch(t *testing.T) {
+	tests := []struct {
+		name               string
+		urls               []string
+		mockBatchStoreFunc func(records []repository.BatchRecord) error
+		wantErr            bool
+		wantLen            int
+	}{
+		{
+			name: "успешное пакетное создание",
+			urls: []string{"https://example.com", "https://practicum.yandex.ru"},
+			mockBatchStoreFunc: func(records []repository.BatchRecord) error {
+				return nil
+			},
+			wantErr: false,
+			wantLen: 2,
+		},
+		{
+			name: "ошибка пакетного сохранения",
+			urls: []string{"https://example.com", "https://practicum.yandex.ru"},
+			mockBatchStoreFunc: func(records []repository.BatchRecord) error {
+				return errors.New("batch store error")
+			},
+			wantErr: true,
+			wantLen: 0,
+		},
+		{
+			name:    "пустой батч",
+			urls:    nil,
+			wantErr: true,
+			wantLen: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRepo := &mockURLRepository{
+				batchStoreFunc: tt.mockBatchStoreFunc,
+			}
+			svc := service.NewShortenerService(mockRepo)
+
+			ids, err := svc.CreateBatch(tt.urls)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Len(t, ids, tt.wantLen)
+			for _, id := range ids {
+				assert.NotEmpty(t, id)
 			}
 		})
 	}

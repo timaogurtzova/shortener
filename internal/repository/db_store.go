@@ -43,10 +43,41 @@ func (s *DBStore) Store(id, url string) error {
 
 	var pqErr *pq.Error
 	if errors.As(err, &pqErr) && pqErr.Code == "23505" {
-		return errors.New("id already exists")
+		return ErrIDAlreadyExists
 	}
 
 	return err
+}
+
+// BatchStore сохраняет пакет URL в рамках одной транзакции.
+func (s *DBStore) BatchStore(records []BatchRecord) error {
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(context.Background(), insertShortURLQuery)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, record := range records {
+		_, err = stmt.ExecContext(context.Background(), record.ID, record.OriginalURL)
+		if err == nil {
+			continue
+		}
+
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+			return ErrIDAlreadyExists
+		}
+
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // Load возвращает исходный URL по короткому идентификатору.
@@ -59,7 +90,7 @@ func (s *DBStore) Load(id string) (string, error) {
 	}
 
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", errors.New("not found")
+		return "", ErrNotFound
 	}
 
 	return "", err

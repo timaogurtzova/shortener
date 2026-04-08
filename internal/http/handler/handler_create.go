@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	maxBodySize     = 2048
-	contentTypeText = "text/plain"
-	contentTypeJSON = "application/json"
+	maxBodySize      = 2048
+	maxBatchBodySize = 65536
+	contentTypeText  = "text/plain"
+	contentTypeJSON  = "application/json"
 )
 
 type CreateHandler struct {
@@ -87,6 +88,66 @@ func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Reques
 	}
 
 	responseBody, err := json.Marshal(shortenResponse{Result: shortURL})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	w.Header().Set("Content-Type", contentTypeJSON)
+	w.WriteHeader(http.StatusCreated)
+	w.Write(responseBody)
+}
+
+func (h *CreateHandler) CreateShortURLBatchJSON(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), contentTypeJSON) {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBatchBodySize)
+	defer r.Body.Close()
+
+	var request []batchShortenRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+
+	if len(request) == 0 {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+
+	originalURLs := make([]string, len(request))
+	response := make([]batchShortenResponse, len(request))
+
+	for i, item := range request {
+		correlationID := strings.TrimSpace(item.CorrelationID)
+		originalURL := strings.TrimSpace(item.OriginalURL)
+		if correlationID == "" || originalURL == "" {
+			writeError(w, http.StatusBadRequest, "bad request")
+			return
+		}
+
+		originalURLs[i] = originalURL
+		response[i].CorrelationID = correlationID
+	}
+
+	shortIDs, err := h.service.CreateBatch(originalURLs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if len(shortIDs) != len(request) {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	for i, shortID := range shortIDs {
+		response[i].ShortURL = h.baseURL + "/" + shortID
+	}
+
+	responseBody, err := json.Marshal(response)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return

@@ -258,3 +258,126 @@ func TestCreateShortURLJSONHandler(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateShortURLBatchJSONHandler(t *testing.T) {
+	type want struct {
+		code        int
+		response    string
+		contentType string
+	}
+
+	tests := []struct {
+		name        string
+		contentType string
+		body        string
+		mock        func() *mockURLShortener
+		want        want
+	}{
+		{
+			name:        "успешное пакетное создание через json",
+			body:        `[{"correlation_id":"1","original_url":"https://example.com"},{"correlation_id":"2","original_url":"https://practicum.yandex.ru"}]`,
+			contentType: "application/json",
+			mock: func() *mockURLShortener {
+				return &mockURLShortener{
+					CreateBatchMockFunc: func(urls []string) ([]string, error) {
+						return []string{"abc123", "def456"}, nil
+					},
+				}
+			},
+			want: want{
+				code:        http.StatusCreated,
+				response:    `[{"correlation_id":"1","short_url":"http://localhost:8080/abc123"},{"correlation_id":"2","short_url":"http://localhost:8080/def456"}]`,
+				contentType: "application/json",
+			},
+		},
+		{
+			name:        "неправильный Content-Type",
+			body:        `[{"correlation_id":"1","original_url":"https://example.com"}]`,
+			contentType: "text/plain",
+			want: want{
+				code:        http.StatusBadRequest,
+				response:    "bad request\n",
+				contentType: "text/plain; charset=utf-8",
+			},
+		},
+		{
+			name:        "пустой батч",
+			body:        `[]`,
+			contentType: "application/json",
+			want: want{
+				code:        http.StatusBadRequest,
+				response:    "bad request\n",
+				contentType: "text/plain; charset=utf-8",
+			},
+		},
+		{
+			name:        "пустой correlation_id",
+			body:        `[{"correlation_id":" ","original_url":"https://example.com"}]`,
+			contentType: "application/json",
+			want: want{
+				code:        http.StatusBadRequest,
+				response:    "bad request\n",
+				contentType: "text/plain; charset=utf-8",
+			},
+		},
+		{
+			name:        "ошибка сервиса",
+			body:        `[{"correlation_id":"1","original_url":"https://example.com"}]`,
+			contentType: "application/json",
+			mock: func() *mockURLShortener {
+				return &mockURLShortener{
+					CreateBatchMockFunc: func(urls []string) ([]string, error) {
+						return nil, errors.New("service error")
+					},
+				}
+			},
+			want: want{
+				code:        http.StatusInternalServerError,
+				response:    "internal server error\n",
+				contentType: "text/plain; charset=utf-8",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var svc service.URLShortener
+			if test.mock != nil {
+				svc = test.mock()
+			} else {
+				svc = &mockURLShortener{
+					CreateBatchMockFunc: func(urls []string) ([]string, error) { return nil, nil },
+				}
+			}
+
+			h := handler.NewCreateHandler(svc, "http://localhost:8080")
+
+			req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", strings.NewReader(test.body))
+			req.Header.Set("Content-Type", test.contentType)
+			rec := httptest.NewRecorder()
+
+			h.CreateShortURLBatchJSON(rec, req)
+
+			res := rec.Result()
+			defer res.Body.Close()
+
+			assert.Equal(t, test.want.code, res.StatusCode)
+
+			body, err := io.ReadAll(res.Body)
+			require.NoError(t, err)
+
+			if test.want.contentType == "application/json" {
+				var actual []map[string]string
+				require.NoError(t, json.Unmarshal(body, &actual))
+
+				var expected []map[string]string
+				require.NoError(t, json.Unmarshal([]byte(test.want.response), &expected))
+				assert.Equal(t, expected, actual)
+			} else {
+				assert.Equal(t, test.want.response, string(body))
+			}
+
+			assert.Equal(t, test.want.contentType, res.Header.Get("Content-Type"))
+		})
+	}
+}

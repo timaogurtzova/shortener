@@ -24,6 +24,7 @@ func TestServerRouting(t *testing.T) {
 		wantCode                    int
 		wantCreateShortURLPlainText bool
 		wantCreateShortURLJSON      bool
+		wantCreateShortURLBatchJSON bool
 		wantRedirect                bool
 		wantPing                    bool
 	}{
@@ -35,6 +36,7 @@ func TestServerRouting(t *testing.T) {
 			wantCode:                    http.StatusCreated,
 			wantCreateShortURLPlainText: true,
 			wantCreateShortURLJSON:      false,
+			wantCreateShortURLBatchJSON: false,
 			wantRedirect:                false,
 			wantPing:                    false,
 		},
@@ -46,6 +48,7 @@ func TestServerRouting(t *testing.T) {
 			wantCode:                    http.StatusBadRequest,
 			wantCreateShortURLPlainText: false,
 			wantCreateShortURLJSON:      false,
+			wantCreateShortURLBatchJSON: false,
 			wantRedirect:                false,
 			wantPing:                    false,
 		},
@@ -57,6 +60,19 @@ func TestServerRouting(t *testing.T) {
 			wantCode:                    http.StatusCreated,
 			wantCreateShortURLPlainText: false,
 			wantCreateShortURLJSON:      true,
+			wantCreateShortURLBatchJSON: false,
+			wantRedirect:                false,
+			wantPing:                    false,
+		},
+		{
+			name:                        "POST /api/shorten/batch -> createShortURLBatchJSON handler ok",
+			method:                      http.MethodPost,
+			path:                        "/api/shorten/batch",
+			wantBody:                    "create-batch-json",
+			wantCode:                    http.StatusCreated,
+			wantCreateShortURLPlainText: false,
+			wantCreateShortURLJSON:      false,
+			wantCreateShortURLBatchJSON: true,
 			wantRedirect:                false,
 			wantPing:                    false,
 		},
@@ -68,6 +84,7 @@ func TestServerRouting(t *testing.T) {
 			wantCode:                    http.StatusOK,
 			wantCreateShortURLPlainText: false,
 			wantCreateShortURLJSON:      false,
+			wantCreateShortURLBatchJSON: false,
 			wantRedirect:                false,
 			wantPing:                    true,
 		},
@@ -79,6 +96,7 @@ func TestServerRouting(t *testing.T) {
 			wantCode:                    http.StatusTemporaryRedirect,
 			wantCreateShortURLPlainText: false,
 			wantCreateShortURLJSON:      false,
+			wantCreateShortURLBatchJSON: false,
 			wantRedirect:                true,
 			wantPing:                    false,
 		},
@@ -90,6 +108,7 @@ func TestServerRouting(t *testing.T) {
 			wantCode:                    http.StatusBadRequest,
 			wantCreateShortURLPlainText: false,
 			wantCreateShortURLJSON:      false,
+			wantCreateShortURLBatchJSON: false,
 			wantRedirect:                false,
 			wantPing:                    false,
 		},
@@ -100,6 +119,7 @@ func TestServerRouting(t *testing.T) {
 			// Флаги для проверки вызова handler'ов
 			createShortURLPlainTextCalled := false
 			createShortURLJSONCalled := false
+			createShortURLBatchJSONCalled := false
 			redirectCalled := false
 			pingCalled := false
 
@@ -123,6 +143,16 @@ func TestServerRouting(t *testing.T) {
 				w.Write([]byte("create-json"))
 			})
 
+			createShortURLBatchJSONHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				createShortURLBatchJSONCalled = true
+				if r.Method != http.MethodPost {
+					http.Error(w, "bad request", http.StatusBadRequest)
+					return
+				}
+				w.WriteHeader(http.StatusCreated)
+				w.Write([]byte("create-batch-json"))
+			})
+
 			// Мок RedirectHandler
 			redirectHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				redirectCalled = true
@@ -144,7 +174,7 @@ func TestServerRouting(t *testing.T) {
 			})
 
 			// Создаём handler через NewRouter (production-стиль)
-			router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, redirectHandler, pingHandler)
+			router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, createShortURLBatchJSONHandler, redirectHandler, pingHandler)
 
 			// Создаём рекордер и запрос
 			var bodyReader *strings.Reader
@@ -175,6 +205,7 @@ func TestServerRouting(t *testing.T) {
 			// Проверка, какой handler был вызван
 			assert.Equal(t, tt.wantCreateShortURLPlainText, createShortURLPlainTextCalled)
 			assert.Equal(t, tt.wantCreateShortURLJSON, createShortURLJSONCalled)
+			assert.Equal(t, tt.wantCreateShortURLBatchJSON, createShortURLBatchJSONCalled)
 			assert.Equal(t, tt.wantRedirect, redirectCalled)
 			assert.Equal(t, tt.wantPing, pingCalled)
 		})
@@ -199,7 +230,7 @@ func TestLoggingMiddlewareLogsRequestAndResponseData(t *testing.T) {
 		w.Write([]byte("redirect"))
 	})
 
-	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLPlainTextHandler, redirectHandler, okPingHandler())
+	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLPlainTextHandler, createShortURLPlainTextHandler, redirectHandler, okPingHandler())
 
 	req := httptest.NewRequest(http.MethodPost, "/?trace=1", strings.NewReader("body"))
 	rec := httptest.NewRecorder()
@@ -232,7 +263,7 @@ func TestLoggingMiddlewareLogsImplicitStatusCode(t *testing.T) {
 		w.Write([]byte("redirect"))
 	})
 
-	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLPlainTextHandler, redirectHandler, okPingHandler())
+	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLPlainTextHandler, createShortURLPlainTextHandler, redirectHandler, okPingHandler())
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("body"))
 	rec := httptest.NewRecorder()
@@ -266,7 +297,7 @@ func TestGzipRequestMiddlewareDecompressesRequestBody(t *testing.T) {
 		w.WriteHeader(http.StatusTemporaryRedirect)
 	})
 
-	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, redirectHandler, okPingHandler())
+	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, createShortURLJSONHandler, redirectHandler, okPingHandler())
 
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(gzipData(t, "http://localhost:8080")))
 	req.Header.Set("Content-Type", "text/plain")
@@ -296,7 +327,7 @@ func TestGzipRequestMiddlewareReturnsBadRequestForUnsupportedEncoding(t *testing
 		w.WriteHeader(http.StatusTemporaryRedirect)
 	})
 
-	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, redirectHandler, okPingHandler())
+	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, createShortURLJSONHandler, redirectHandler, okPingHandler())
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("body"))
 	req.Header.Set("Content-Type", "text/plain")
@@ -326,7 +357,7 @@ func TestGzipRequestMiddlewareReturnsBadRequestForBrokenGzip(t *testing.T) {
 		w.WriteHeader(http.StatusTemporaryRedirect)
 	})
 
-	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, redirectHandler, okPingHandler())
+	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, createShortURLJSONHandler, redirectHandler, okPingHandler())
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("not-a-gzip-stream"))
 	req.Header.Set("Content-Type", "text/plain")
@@ -356,7 +387,7 @@ func TestGzipRequestMiddlewareReturnsBadRequestForMultipleEncodings(t *testing.T
 		w.WriteHeader(http.StatusTemporaryRedirect)
 	})
 
-	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, redirectHandler, okPingHandler())
+	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, createShortURLJSONHandler, redirectHandler, okPingHandler())
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("body"))
 	req.Header.Set("Content-Type", "text/plain")
@@ -386,7 +417,7 @@ func TestGzipResponseMiddlewareCompressesJSONResponse(t *testing.T) {
 		w.WriteHeader(http.StatusTemporaryRedirect)
 	})
 
-	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, redirectHandler, okPingHandler())
+	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, createShortURLJSONHandler, redirectHandler, okPingHandler())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(`{"url":"https://practicum.yandex.ru"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -420,7 +451,7 @@ func TestGzipResponseMiddlewareSkipsUnsupportedContentType(t *testing.T) {
 		w.WriteHeader(http.StatusTemporaryRedirect)
 	})
 
-	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, redirectHandler, okPingHandler())
+	router := httpserver.NewRouter(createShortURLPlainTextHandler, createShortURLJSONHandler, createShortURLJSONHandler, redirectHandler, okPingHandler())
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("body"))
 	req.Header.Set("Content-Type", "text/plain")

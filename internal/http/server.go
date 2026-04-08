@@ -33,7 +33,7 @@ func NewServer(cfg *config.Configuration, router http.Handler) *Server {
 	}
 }
 
-func NewRouter(createHandlerFunc, createJSONHandlerFunc, redirectHandlerFunc, pingHandlerFunc http.HandlerFunc) http.Handler {
+func NewRouter(createHandlerFunc, createJSONHandlerFunc, createBatchHandlerFunc, redirectHandlerFunc, pingHandlerFunc http.HandlerFunc) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(httpmiddleware.Logging)
@@ -42,6 +42,7 @@ func NewRouter(createHandlerFunc, createJSONHandlerFunc, redirectHandlerFunc, pi
 	// --- Routes ---
 	r.Post("/", createHandlerFunc)
 	r.Post("/api/shorten", createJSONHandlerFunc)
+	r.Post("/api/shorten/batch", createBatchHandlerFunc)
 	r.Get("/ping", pingHandlerFunc)
 	r.Get("/{id}", redirectHandlerFunc)
 

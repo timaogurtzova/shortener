@@ -4,8 +4,9 @@ import "errors"
 
 // реализует интерфейс URLShortener для тестов
 type mockURLShortener struct {
-	CreateMockFunc  func(string) (string, error)
-	ResolveMockFunc func(string) (string, error)
+	CreateMockFunc      func(string) (string, error)
+	CreateBatchMockFunc func([]string) ([]string, error)
+	ResolveMockFunc     func(string) (string, error)
 }
 
 func (m *mockURLShortener) Create(url string) (string, error) {
@@ -13,6 +14,13 @@ func (m *mockURLShortener) Create(url string) (string, error) {
 		return m.CreateMockFunc(url)
 	}
 	return "", errors.New("not implemented")
+}
+
+func (m *mockURLShortener) CreateBatch(urls []string) ([]string, error) {
+	if m.CreateBatchMockFunc != nil {
+		return m.CreateBatchMockFunc(urls)
+	}
+	return nil, errors.New("not implemented")
 }
 
 func (m *mockURLShortener) Resolve(id string) (string, error) {

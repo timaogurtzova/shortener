@@ -44,7 +44,7 @@ func (s *FileStore) Store(id, url string) error {
 	defer s.mu.Unlock()
 
 	if _, exists := s.urls[id]; exists {
-		return errors.New("id already exists")
+		return ErrIDAlreadyExists
 	}
 
 	record := storedURLRecord{
@@ -67,13 +67,57 @@ func (s *FileStore) Store(id, url string) error {
 	return nil
 }
 
+func (s *FileStore) BatchStore(records []BatchRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	seen := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		if _, exists := seen[record.ID]; exists {
+			return ErrIDAlreadyExists
+		}
+		if _, exists := s.urls[record.ID]; exists {
+			return ErrIDAlreadyExists
+		}
+		seen[record.ID] = struct{}{}
+	}
+
+	initialRecordsLen := len(s.records)
+	initialNextUUID := s.nextUUID
+
+	insertedIDs := make([]string, 0, len(records))
+	for _, record := range records {
+		storedRecord := storedURLRecord{
+			UUID:        strconv.Itoa(s.nextUUID),
+			ShortURL:    record.ID,
+			OriginalURL: record.OriginalURL,
+		}
+
+		s.urls[record.ID] = record.OriginalURL
+		s.records = append(s.records, storedRecord)
+		s.nextUUID++
+		insertedIDs = append(insertedIDs, record.ID)
+	}
+
+	if err := s.persist(); err != nil {
+		for _, id := range insertedIDs {
+			delete(s.urls, id)
+		}
+		s.records = s.records[:initialRecordsLen]
+		s.nextUUID = initialNextUUID
+		return err
+	}
+
+	return nil
+}
+
 func (s *FileStore) Load(id string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	url, ok := s.urls[id]
 	if !ok {
-		return "", errors.New("not found")
+		return "", ErrNotFound
 	}
 
 	return url, nil
@@ -99,7 +143,7 @@ func (s *FileStore) load() error {
 
 	for _, record := range records {
 		if _, exists := s.urls[record.ShortURL]; exists {
-			return fmt.Errorf("duplicate short url in file storage: %s", record.ShortURL)
+			return fmt.Errorf("%w: %s", ErrIDAlreadyExists, record.ShortURL)
 		}
 		s.urls[record.ShortURL] = record.OriginalURL
 	}
