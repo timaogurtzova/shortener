@@ -1,50 +1,83 @@
 package main
 
 import (
-	"database/sql"
+	"context"
+	"fmt"
 
-	_ "github.com/lib/pq"
 	"github.com/rs/zerolog/log"
 	"github.com/timaogurtzova/shortener/internal/config"
-	"github.com/timaogurtzova/shortener/internal/http"
+	httpserver "github.com/timaogurtzova/shortener/internal/http"
 	"github.com/timaogurtzova/shortener/internal/http/handler"
+	"github.com/timaogurtzova/shortener/internal/postgres"
 	"github.com/timaogurtzova/shortener/internal/repository"
 	"github.com/timaogurtzova/shortener/internal/service"
 )
 
 func main() {
-	//Configuration
+	if err := run(); err != nil {
+		log.Fatal().Err(err).Msg("application stopped with error")
+	}
+}
+
+// run инициализирует зависимости приложения и запускает HTTP-сервер.
+func run() error {
+	// Загружаем конфигурацию приложения.
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatal().Err(err).Msg("Error loading config")
-		return
+		return fmt.Errorf("load config: %w", err)
 	}
-	//Repository
-	repo, err := repository.NewFileStore(cfg.Storage.FileStoragePath)
+
+	// Инициализируем базу данных, если она явно настроена.
+	database, err := postgres.Open(context.Background(), cfg.Database)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Error initializing file storage")
-		return
+		return fmt.Errorf("initialize database connection: %w", err)
 	}
-	//Database
-	var db *sql.DB
-	if cfg.Database.DSN != "" {
-		db, err = sql.Open("postgres", cfg.Database.DSN)
-		if err != nil {
-			log.Fatal().Err(err).Msg("Error initializing database connection")
-			return
-		}
-		defer db.Close()
+	if database != nil {
+		defer func() {
+			if err := database.Close(); err != nil {
+				log.Error().Err(err).Msg("Error closing database connection")
+			}
+		}()
 	}
-	//Service
+
+	// Выбираем хранилище URL по конфигурации.
+	repo, err := newURLRepository(cfg, database)
+	if err != nil {
+		return fmt.Errorf("initialize url repository: %w", err)
+	}
+
+	// Собираем сервисный и HTTP-слои приложения.
 	svc := service.NewShortenerService(repo)
-	//Handlers
 	createHandler := handler.NewCreateHandler(svc, cfg.Server.BaseURL)
 	redirectHandler := handler.NewRedirectHandler(svc)
-	pingHandler := handler.NewPingHandler(repository.NewDBHealthChecker(db))
+	pingHandler := handler.NewPingHandler(database)
 	router := httpserver.NewRouter(createHandler.CreateShortURLPlainText, createHandler.CreateShortURLJSON, redirectHandler.Redirect, pingHandler.Ping)
-	// HTTP server
+
+	// Запускаем HTTP-сервер.
 	server := httpserver.NewServer(cfg, router)
 	if err := server.Run(); err != nil {
-		log.Fatal().Err(err).Msg("server stopped with error")
+		return fmt.Errorf("run http server: %w", err)
 	}
+
+	return nil
+}
+
+// newURLRepository выбирает хранилище URL по приоритету:
+// PostgreSQL -> файл -> память.
+func newURLRepository(cfg *config.Configuration, database *postgres.Database) (repository.URLRepository, error) {
+	if cfg.Database.IsConfigured() {
+		log.Info().Msg("Using PostgreSQL storage")
+		if database == nil {
+			return nil, postgres.ErrDatabaseNotConfigured
+		}
+		return repository.NewDBStore(database.SQLDB())
+	}
+
+	if cfg.Storage.IsConfigured() {
+		log.Info().Str("FileStoragePath", cfg.Storage.Path()).Msg("Using file storage")
+		return repository.NewFileStore(cfg.Storage.Path())
+	}
+
+	log.Info().Msg("Using in-memory storage")
+	return repository.NewInMemoryStore(), nil
 }
