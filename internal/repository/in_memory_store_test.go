@@ -24,3 +24,16 @@ func TestInMemoryStoreBatchStore(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "http://ya.ru", url)
 }
+
+func TestInMemoryStoreStoreReturnsConflictForExistingOriginalURL(t *testing.T) {
+	store := NewInMemoryStore()
+
+	require.NoError(t, store.Store("abc123", "http://yandex.ru"))
+
+	err := store.Store("def456", "http://yandex.ru")
+	require.Error(t, err)
+
+	var conflictErr *URLConflictError
+	require.ErrorAs(t, err, &conflictErr)
+	assert.Equal(t, "abc123", conflictErr.ShortID)
+}

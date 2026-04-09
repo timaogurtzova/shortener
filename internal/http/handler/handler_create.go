@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -56,8 +57,8 @@ func (h *CreateHandler) CreateShortURLPlainText(w http.ResponseWriter, r *http.R
 
 	// Формирование ответа
 	w.Header().Set("Content-Type", contentTypeText)
-	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(shortURL))
+	w.WriteHeader(shortURL.statusCode)
+	w.Write([]byte(shortURL.value))
 }
 
 func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Request) {
@@ -87,14 +88,14 @@ func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	responseBody, err := json.Marshal(shortenResponse{Result: shortURL})
+	responseBody, err := json.Marshal(shortenResponse{Result: shortURL.value})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
 	w.Header().Set("Content-Type", contentTypeJSON)
-	w.WriteHeader(http.StatusCreated)
+	w.WriteHeader(shortURL.statusCode)
 	w.Write(responseBody)
 }
 
@@ -158,13 +159,28 @@ func (h *CreateHandler) CreateShortURLBatchJSON(w http.ResponseWriter, r *http.R
 	w.Write(responseBody)
 }
 
-func (h *CreateHandler) createShortURL(originalURL string) (string, error) {
+type createShortURLResult struct {
+	value      string
+	statusCode int
+}
+
+func (h *CreateHandler) createShortURL(originalURL string) (createShortURLResult, error) {
 	shortID, err := h.service.Create(originalURL)
 	if err != nil {
-		return "", err
+		if errors.Is(err, service.ErrURLAlreadyExists) && shortID != "" {
+			return createShortURLResult{
+				value:      h.baseURL + "/" + shortID,
+				statusCode: http.StatusConflict,
+			}, nil
+		}
+
+		return createShortURLResult{}, err
 	}
 
-	return h.baseURL + "/" + shortID, nil
+	return createShortURLResult{
+		value:      h.baseURL + "/" + shortID,
+		statusCode: http.StatusCreated,
+	}, nil
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

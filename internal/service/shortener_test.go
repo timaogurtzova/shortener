@@ -13,21 +13,34 @@ func TestShortenerService_Create(t *testing.T) {
 	tests := []struct {
 		name          string
 		mockStoreFunc func(id, url string) error
+		wantID        string
 		wantErr       bool
+		wantConflict  bool
 	}{
 		{
 			name: "успешное создание",
 			mockStoreFunc: func(id, url string) error {
 				return nil
 			},
-			wantErr: false,
+			wantErr:      false,
+			wantConflict: false,
 		},
 		{
 			name: "ошибка при сохранении",
 			mockStoreFunc: func(id, url string) error {
 				return errors.New("store error")
 			},
-			wantErr: true,
+			wantErr:      true,
+			wantConflict: false,
+		},
+		{
+			name: "исходный url уже сокращён",
+			mockStoreFunc: func(id, url string) error {
+				return &repository.URLConflictError{ShortID: "abc123"}
+			},
+			wantID:       "abc123",
+			wantErr:      true,
+			wantConflict: true,
 		},
 	}
 
@@ -41,6 +54,10 @@ func TestShortenerService_Create(t *testing.T) {
 			id, err := svc.Create("https://example.com")
 			if tt.wantErr {
 				assert.Error(t, err)
+				if tt.wantConflict {
+					assert.ErrorIs(t, err, service.ErrURLAlreadyExists)
+					assert.Equal(t, tt.wantID, id)
+				}
 			} else {
 				assert.NoError(t, err)
 				assert.NotEmpty(t, id)

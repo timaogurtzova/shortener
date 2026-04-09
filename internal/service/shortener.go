@@ -12,6 +12,9 @@ import (
 const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 const maxGenerateAttempts = 10
 
+// ErrURLAlreadyExists возвращается, когда исходный URL уже был сокращён ранее.
+var ErrURLAlreadyExists = errors.New("url already exists")
+
 // ShortenerService хранит mapping id → URL
 type ShortenerService struct {
 	repo repository.URLRepository
@@ -33,6 +36,11 @@ func (s *ShortenerService) Create(url string) (string, error) {
 		err = s.repo.Store(id, url)
 		if err == nil {
 			return id, nil
+		}
+
+		var conflictErr *repository.URLConflictError
+		if errors.As(err, &conflictErr) {
+			return conflictErr.ShortID, ErrURLAlreadyExists
 		}
 
 		if !errors.Is(err, repository.ErrIDAlreadyExists) {

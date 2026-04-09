@@ -122,3 +122,19 @@ func TestFileStoreBatchStorePersistsAndRestoresURLs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "http://ya.ru", url)
 }
+
+func TestFileStoreStoreReturnsConflictForExistingOriginalURL(t *testing.T) {
+	storagePath := filepath.Join(t.TempDir(), "storage.json")
+
+	store, err := NewFileStore(storagePath)
+	require.NoError(t, err)
+
+	require.NoError(t, store.Store("abc123", "http://yandex.ru"))
+
+	err = store.Store("def456", "http://yandex.ru")
+	require.Error(t, err)
+
+	var conflictErr *URLConflictError
+	require.ErrorAs(t, err, &conflictErr)
+	assert.Equal(t, "abc123", conflictErr.ShortID)
+}

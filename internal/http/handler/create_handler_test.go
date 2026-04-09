@@ -90,6 +90,24 @@ func TestCreateShortURLPlainTextHandler(t *testing.T) {
 				contentType: "text/plain; charset=utf-8",
 			},
 		},
+		{
+			name:        "url уже существует",
+			method:      http.MethodPost,
+			body:        "http://localhost:8080",
+			contentType: "text/plain",
+			mock: func() *mockURLShortener {
+				return &mockURLShortener{
+					CreateMockFunc: func(url string) (string, error) {
+						return "abc123", service.ErrURLAlreadyExists
+					},
+				}
+			},
+			want: want{
+				code:        http.StatusConflict,
+				response:    "http://localhost:8080/abc123",
+				contentType: "text/plain",
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -212,6 +230,24 @@ func TestCreateShortURLJSONHandler(t *testing.T) {
 				code:        http.StatusInternalServerError,
 				response:    "internal server error\n",
 				contentType: "text/plain; charset=utf-8",
+			},
+		},
+		{
+			name:        "url уже существует",
+			method:      http.MethodPost,
+			body:        `{"url":"https://practicum.yandex.ru"}`,
+			contentType: "application/json",
+			mock: func() *mockURLShortener {
+				return &mockURLShortener{
+					CreateMockFunc: func(url string) (string, error) {
+						return "abc123", service.ErrURLAlreadyExists
+					},
+				}
+			},
+			want: want{
+				code:        http.StatusConflict,
+				response:    `{"result":"http://localhost:8080/abc123"}`,
+				contentType: "application/json",
 			},
 		},
 	}

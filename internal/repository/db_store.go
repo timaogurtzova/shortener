@@ -9,9 +9,21 @@ import (
 )
 
 const (
-	insertShortURLQuery = `
-		INSERT INTO short_urls (short_url, original_url)
-		VALUES ($1, $2)
+	storeShortURLQuery = `
+		WITH inserted AS (
+			INSERT INTO short_urls (short_url, original_url)
+			VALUES ($1, $2)
+			ON CONFLICT (original_url) DO NOTHING
+			RETURNING short_url, TRUE AS created
+		)
+		SELECT short_url, created
+		FROM inserted
+		UNION ALL
+		SELECT short_url, FALSE AS created
+		FROM short_urls
+		WHERE original_url = $2
+		  AND NOT EXISTS (SELECT 1 FROM inserted)
+		LIMIT 1
 	`
 	selectOriginalURLQuery = `
 		SELECT original_url
@@ -36,8 +48,15 @@ func NewDBStore(db *sql.DB) (*DBStore, error) {
 
 // Store сохраняет исходный URL по короткому идентификатору.
 func (s *DBStore) Store(id, url string) error {
-	_, err := s.db.ExecContext(context.Background(), insertShortURLQuery, id, url)
+	var storedID string
+	var created bool
+
+	err := s.db.QueryRowContext(context.Background(), storeShortURLQuery, id, url).Scan(&storedID, &created)
 	if err == nil {
+		if !created {
+			return &URLConflictError{ShortID: storedID}
+		}
+
 		return nil
 	}
 
@@ -57,15 +76,16 @@ func (s *DBStore) BatchStore(records []BatchRecord) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(context.Background(), insertShortURLQuery)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
 	for _, record := range records {
-		_, err = stmt.ExecContext(context.Background(), record.ID, record.OriginalURL)
+		var storedID string
+		var created bool
+
+		err = tx.QueryRowContext(context.Background(), storeShortURLQuery, record.ID, record.OriginalURL).Scan(&storedID, &created)
 		if err == nil {
+			if !created {
+				return &URLConflictError{ShortID: storedID}
+			}
+
 			continue
 		}
 
