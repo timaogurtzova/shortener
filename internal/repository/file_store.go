@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,7 +42,7 @@ func NewFileStore(path string) (*FileStore, error) {
 	return store, nil
 }
 
-func (s *FileStore) Store(id, url string) error {
+func (s *FileStore) Store(_ context.Context, id, url string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -74,7 +75,7 @@ func (s *FileStore) Store(id, url string) error {
 	return nil
 }
 
-func (s *FileStore) BatchStore(records []BatchRecord) error {
+func (s *FileStore) BatchStore(_ context.Context, records []BatchRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -128,7 +129,7 @@ func (s *FileStore) BatchStore(records []BatchRecord) error {
 	return nil
 }
 
-func (s *FileStore) Load(id string) (string, error) {
+func (s *FileStore) Load(_ context.Context, id string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

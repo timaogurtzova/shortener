@@ -1,6 +1,9 @@
 package repository
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 var (
 	ErrIDAlreadyExists  = errors.New("id already exists")
@@ -29,7 +32,7 @@ type BatchRecord struct {
 
 // URLRepository описывает контракт хранилища URL.
 type URLRepository interface {
-	Store(id, url string) error
-	BatchStore(records []BatchRecord) error
-	Load(id string) (string, error)
+	Store(ctx context.Context, id, url string) error
+	BatchStore(ctx context.Context, records []BatchRecord) error
+	Load(ctx context.Context, id string) (string, error)
 }

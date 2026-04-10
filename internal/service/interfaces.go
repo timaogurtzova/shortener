@@ -4,9 +4,9 @@ import "context"
 
 // URLShortener описывает контракт сервиса сокращения URL для HTTP-обработчиков.
 type URLShortener interface {
-	Create(string) (string, error)
-	CreateBatch([]string) ([]string, error)
-	Resolve(string) (string, error)
+	Create(ctx context.Context, url string) (string, error)
+	CreateBatch(ctx context.Context, urls []string) ([]string, error)
+	Resolve(ctx context.Context, id string) (string, error)
 }
 
 // HealthChecker описывает проверку доступности внешних зависимостей сервиса.

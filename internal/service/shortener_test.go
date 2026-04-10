@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -12,14 +13,14 @@ import (
 func TestShortenerService_Create(t *testing.T) {
 	tests := []struct {
 		name          string
-		mockStoreFunc func(id, url string) error
+		mockStoreFunc func(ctx context.Context, id, url string) error
 		wantID        string
 		wantErr       bool
 		wantConflict  bool
 	}{
 		{
 			name: "успешное создание",
-			mockStoreFunc: func(id, url string) error {
+			mockStoreFunc: func(ctx context.Context, id, url string) error {
 				return nil
 			},
 			wantErr:      false,
@@ -27,7 +28,7 @@ func TestShortenerService_Create(t *testing.T) {
 		},
 		{
 			name: "ошибка при сохранении",
-			mockStoreFunc: func(id, url string) error {
+			mockStoreFunc: func(ctx context.Context, id, url string) error {
 				return errors.New("store error")
 			},
 			wantErr:      true,
@@ -35,7 +36,7 @@ func TestShortenerService_Create(t *testing.T) {
 		},
 		{
 			name: "исходный url уже сокращён",
-			mockStoreFunc: func(id, url string) error {
+			mockStoreFunc: func(ctx context.Context, id, url string) error {
 				return &repository.URLConflictError{ShortID: "abc123"}
 			},
 			wantID:       "abc123",
@@ -51,7 +52,7 @@ func TestShortenerService_Create(t *testing.T) {
 			}
 			svc := service.NewShortenerService(mockRepo)
 
-			id, err := svc.Create("https://example.com")
+			id, err := svc.Create(context.Background(), "https://example.com")
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.wantConflict {
@@ -69,13 +70,13 @@ func TestShortenerService_Create(t *testing.T) {
 func TestShortenerService_Resolve(t *testing.T) {
 	tests := []struct {
 		name     string
-		mockLoad func(id string) (string, error)
+		mockLoad func(ctx context.Context, id string) (string, error)
 		wantURL  string
 		wantErr  bool
 	}{
 		{
 			name: "успешное получение",
-			mockLoad: func(id string) (string, error) {
+			mockLoad: func(ctx context.Context, id string) (string, error) {
 				return "https://example.com", nil
 			},
 			wantURL: "https://example.com",
@@ -83,7 +84,7 @@ func TestShortenerService_Resolve(t *testing.T) {
 		},
 		{
 			name: "id не найден",
-			mockLoad: func(id string) (string, error) {
+			mockLoad: func(ctx context.Context, id string) (string, error) {
 				return "", errors.New("not found")
 			},
 			wantURL: "",
@@ -98,7 +99,7 @@ func TestShortenerService_Resolve(t *testing.T) {
 			}
 			svc := service.NewShortenerService(mockRepo)
 
-			url, err := svc.Resolve("abc123")
+			url, err := svc.Resolve(context.Background(), "abc123")
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -113,14 +114,14 @@ func TestShortenerService_CreateBatch(t *testing.T) {
 	tests := []struct {
 		name               string
 		urls               []string
-		mockBatchStoreFunc func(records []repository.BatchRecord) error
+		mockBatchStoreFunc func(ctx context.Context, records []repository.BatchRecord) error
 		wantErr            bool
 		wantLen            int
 	}{
 		{
 			name: "успешное пакетное создание",
 			urls: []string{"https://example.com", "https://practicum.yandex.ru"},
-			mockBatchStoreFunc: func(records []repository.BatchRecord) error {
+			mockBatchStoreFunc: func(ctx context.Context, records []repository.BatchRecord) error {
 				return nil
 			},
 			wantErr: false,
@@ -129,7 +130,7 @@ func TestShortenerService_CreateBatch(t *testing.T) {
 		{
 			name: "ошибка пакетного сохранения",
 			urls: []string{"https://example.com", "https://practicum.yandex.ru"},
-			mockBatchStoreFunc: func(records []repository.BatchRecord) error {
+			mockBatchStoreFunc: func(ctx context.Context, records []repository.BatchRecord) error {
 				return errors.New("batch store error")
 			},
 			wantErr: true,
@@ -150,7 +151,7 @@ func TestShortenerService_CreateBatch(t *testing.T) {
 			}
 			svc := service.NewShortenerService(mockRepo)
 
-			ids, err := svc.CreateBatch(tt.urls)
+			ids, err := svc.CreateBatch(context.Background(), tt.urls)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return

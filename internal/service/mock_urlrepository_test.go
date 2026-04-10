@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"context"
 	"errors"
 
 	"github.com/timaogurtzova/shortener/internal/repository"
@@ -8,28 +9,28 @@ import (
 
 // mockURLRepository реализует repository.URLRepository для тестов
 type mockURLRepository struct {
-	storeFunc      func(id, url string) error
-	batchStoreFunc func(records []repository.BatchRecord) error
-	loadFunc       func(id string) (string, error)
+	storeFunc      func(ctx context.Context, id, url string) error
+	batchStoreFunc func(ctx context.Context, records []repository.BatchRecord) error
+	loadFunc       func(ctx context.Context, id string) (string, error)
 }
 
-func (m *mockURLRepository) Store(id, url string) error {
+func (m *mockURLRepository) Store(ctx context.Context, id, url string) error {
 	if m.storeFunc != nil {
-		return m.storeFunc(id, url)
+		return m.storeFunc(ctx, id, url)
 	}
 	return nil
 }
 
-func (m *mockURLRepository) BatchStore(records []repository.BatchRecord) error {
+func (m *mockURLRepository) BatchStore(ctx context.Context, records []repository.BatchRecord) error {
 	if m.batchStoreFunc != nil {
-		return m.batchStoreFunc(records)
+		return m.batchStoreFunc(ctx, records)
 	}
 	return nil
 }
 
-func (m *mockURLRepository) Load(id string) (string, error) {
+func (m *mockURLRepository) Load(ctx context.Context, id string) (string, error) {
 	if m.loadFunc != nil {
-		return m.loadFunc(id)
+		return m.loadFunc(ctx, id)
 	}
 	return "", errors.New("not implemented")
 }

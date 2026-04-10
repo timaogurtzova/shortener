@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"math/big"
@@ -26,14 +27,14 @@ func NewShortenerService(repo repository.URLRepository) *ShortenerService {
 }
 
 // Create сохраняет URL и возвращает сгенерированный ID
-func (s *ShortenerService) Create(url string) (string, error) {
+func (s *ShortenerService) Create(ctx context.Context, url string) (string, error) {
 	for i := 0; i < maxGenerateAttempts; i++ {
 		id, err := GenerateID(8)
 		if err != nil {
 			return "", err
 		}
 
-		err = s.repo.Store(id, url)
+		err = s.repo.Store(ctx, id, url)
 		if err == nil {
 			return id, nil
 		}
@@ -51,7 +52,7 @@ func (s *ShortenerService) Create(url string) (string, error) {
 }
 
 // CreateBatch сохраняет пакет URL и возвращает сгенерированные ID в исходном порядке.
-func (s *ShortenerService) CreateBatch(urls []string) ([]string, error) {
+func (s *ShortenerService) CreateBatch(ctx context.Context, urls []string) ([]string, error) {
 	if len(urls) == 0 {
 		return nil, errors.New("empty batch")
 	}
@@ -62,7 +63,7 @@ func (s *ShortenerService) CreateBatch(urls []string) ([]string, error) {
 			return nil, err
 		}
 
-		err = s.repo.BatchStore(records)
+		err = s.repo.BatchStore(ctx, records)
 		if err == nil {
 			return ids, nil
 		}
@@ -76,8 +77,8 @@ func (s *ShortenerService) CreateBatch(urls []string) ([]string, error) {
 }
 
 // Resolve возвращает оригинальный URL по ID
-func (s *ShortenerService) Resolve(id string) (string, error) {
-	return s.repo.Load(id)
+func (s *ShortenerService) Resolve(ctx context.Context, id string) (string, error) {
+	return s.repo.Load(ctx, id)
 }
 
 // GenerateID создаёт случайный ID длиной n

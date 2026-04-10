@@ -47,11 +47,11 @@ func NewDBStore(db *sql.DB) (*DBStore, error) {
 }
 
 // Store сохраняет исходный URL по короткому идентификатору.
-func (s *DBStore) Store(id, url string) error {
+func (s *DBStore) Store(ctx context.Context, id, url string) error {
 	var storedID string
 	var created bool
 
-	err := s.db.QueryRowContext(context.Background(), storeShortURLQuery, id, url).Scan(&storedID, &created)
+	err := s.db.QueryRowContext(ctx, storeShortURLQuery, id, url).Scan(&storedID, &created)
 	if err == nil {
 		if !created {
 			return &URLConflictError{ShortID: storedID}
@@ -69,8 +69,8 @@ func (s *DBStore) Store(id, url string) error {
 }
 
 // BatchStore сохраняет пакет URL в рамках одной транзакции.
-func (s *DBStore) BatchStore(records []BatchRecord) error {
-	tx, err := s.db.BeginTx(context.Background(), nil)
+func (s *DBStore) BatchStore(ctx context.Context, records []BatchRecord) error {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func (s *DBStore) BatchStore(records []BatchRecord) error {
 		var storedID string
 		var created bool
 
-		err = tx.QueryRowContext(context.Background(), storeShortURLQuery, record.ID, record.OriginalURL).Scan(&storedID, &created)
+		err = tx.QueryRowContext(ctx, storeShortURLQuery, record.ID, record.OriginalURL).Scan(&storedID, &created)
 		if err == nil {
 			if !created {
 				return &URLConflictError{ShortID: storedID}
@@ -101,10 +101,10 @@ func (s *DBStore) BatchStore(records []BatchRecord) error {
 }
 
 // Load возвращает исходный URL по короткому идентификатору.
-func (s *DBStore) Load(id string) (string, error) {
+func (s *DBStore) Load(ctx context.Context, id string) (string, error) {
 	var originalURL string
 
-	err := s.db.QueryRowContext(context.Background(), selectOriginalURLQuery, id).Scan(&originalURL)
+	err := s.db.QueryRowContext(ctx, selectOriginalURLQuery, id).Scan(&originalURL)
 	if err == nil {
 		return originalURL, nil
 	}

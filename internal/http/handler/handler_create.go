@@ -49,7 +49,7 @@ func (h *CreateHandler) CreateShortURLPlainText(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	shortURL, err := h.createShortURL(originalURL)
+	shortURL, err := h.createShortURL(r, originalURL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
@@ -82,7 +82,7 @@ func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	shortURL, err := h.createShortURL(originalURL)
+	shortURL, err := h.createShortURL(r, originalURL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
@@ -134,7 +134,7 @@ func (h *CreateHandler) CreateShortURLBatchJSON(w http.ResponseWriter, r *http.R
 		response[i].CorrelationID = correlationID
 	}
 
-	shortIDs, err := h.service.CreateBatch(originalURLs)
+	shortIDs, err := h.service.CreateBatch(r.Context(), originalURLs)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
@@ -164,8 +164,8 @@ type createShortURLResult struct {
 	statusCode int
 }
 
-func (h *CreateHandler) createShortURL(originalURL string) (createShortURLResult, error) {
-	shortID, err := h.service.Create(originalURL)
+func (h *CreateHandler) createShortURL(r *http.Request, originalURL string) (createShortURLResult, error) {
+	shortID, err := h.service.Create(r.Context(), originalURL)
 	if err != nil {
 		if errors.Is(err, service.ErrURLAlreadyExists) && shortID != "" {
 			return createShortURLResult{

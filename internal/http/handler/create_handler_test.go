@@ -1,6 +1,7 @@
 package handler_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -37,7 +38,7 @@ func TestCreateShortURLPlainTextHandler(t *testing.T) {
 			contentType: "text/plain",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					CreateMockFunc: func(url string) (string, error) {
+					CreateMockFunc: func(ctx context.Context, url string) (string, error) {
 						return "abc123", nil
 					},
 				}
@@ -79,7 +80,7 @@ func TestCreateShortURLPlainTextHandler(t *testing.T) {
 			contentType: "text/plain",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					CreateMockFunc: func(url string) (string, error) {
+					CreateMockFunc: func(ctx context.Context, url string) (string, error) {
 						return "", errors.New("service error")
 					},
 				}
@@ -97,7 +98,7 @@ func TestCreateShortURLPlainTextHandler(t *testing.T) {
 			contentType: "text/plain",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					CreateMockFunc: func(url string) (string, error) {
+					CreateMockFunc: func(ctx context.Context, url string) (string, error) {
 						return "abc123", service.ErrURLAlreadyExists
 					},
 				}
@@ -118,7 +119,7 @@ func TestCreateShortURLPlainTextHandler(t *testing.T) {
 			} else {
 				// минимальный мок
 				svc = &mockURLShortener{
-					CreateMockFunc: func(url string) (string, error) { return "", nil },
+					CreateMockFunc: func(ctx context.Context, url string) (string, error) { return "", nil },
 				}
 			}
 
@@ -170,7 +171,7 @@ func TestCreateShortURLJSONHandler(t *testing.T) {
 			contentType: "application/json",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					CreateMockFunc: func(url string) (string, error) {
+					CreateMockFunc: func(ctx context.Context, url string) (string, error) {
 						return "abc123", nil
 					},
 				}
@@ -221,7 +222,7 @@ func TestCreateShortURLJSONHandler(t *testing.T) {
 			contentType: "application/json",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					CreateMockFunc: func(url string) (string, error) {
+					CreateMockFunc: func(ctx context.Context, url string) (string, error) {
 						return "", errors.New("service error")
 					},
 				}
@@ -239,7 +240,7 @@ func TestCreateShortURLJSONHandler(t *testing.T) {
 			contentType: "application/json",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					CreateMockFunc: func(url string) (string, error) {
+					CreateMockFunc: func(ctx context.Context, url string) (string, error) {
 						return "abc123", service.ErrURLAlreadyExists
 					},
 				}
@@ -259,7 +260,7 @@ func TestCreateShortURLJSONHandler(t *testing.T) {
 				svc = test.mock()
 			} else {
 				svc = &mockURLShortener{
-					CreateMockFunc: func(url string) (string, error) { return "", nil },
+					CreateMockFunc: func(ctx context.Context, url string) (string, error) { return "", nil },
 				}
 			}
 
@@ -315,7 +316,7 @@ func TestCreateShortURLBatchJSONHandler(t *testing.T) {
 			contentType: "application/json",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					CreateBatchMockFunc: func(urls []string) ([]string, error) {
+					CreateBatchMockFunc: func(ctx context.Context, urls []string) ([]string, error) {
 						return []string{"abc123", "def456"}, nil
 					},
 				}
@@ -362,7 +363,7 @@ func TestCreateShortURLBatchJSONHandler(t *testing.T) {
 			contentType: "application/json",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					CreateBatchMockFunc: func(urls []string) ([]string, error) {
+					CreateBatchMockFunc: func(ctx context.Context, urls []string) ([]string, error) {
 						return nil, errors.New("service error")
 					},
 				}
@@ -382,7 +383,7 @@ func TestCreateShortURLBatchJSONHandler(t *testing.T) {
 				svc = test.mock()
 			} else {
 				svc = &mockURLShortener{
-					CreateBatchMockFunc: func(urls []string) ([]string, error) { return nil, nil },
+					CreateBatchMockFunc: func(ctx context.Context, urls []string) ([]string, error) { return nil, nil },
 				}
 			}
 

@@ -51,13 +51,13 @@ func run() error {
 	createHandler := handler.NewCreateHandler(svc, cfg.Server.BaseURL)
 	redirectHandler := handler.NewRedirectHandler(svc)
 	pingHandler := handler.NewPingHandler(database)
-	router := httpserver.NewRouter(
-		createHandler.CreateShortURLPlainText,
-		createHandler.CreateShortURLJSON,
-		createHandler.CreateShortURLBatchJSON,
-		redirectHandler.Redirect,
-		pingHandler.Ping,
-	)
+	router := httpserver.NewRouter(httpserver.RouterHandlers{
+		CreateShortURLPlainText: createHandler.CreateShortURLPlainText,
+		CreateShortURLJSON:      createHandler.CreateShortURLJSON,
+		CreateShortURLBatchJSON: createHandler.CreateShortURLBatchJSON,
+		Redirect:                redirectHandler.Redirect,
+		Ping:                    pingHandler.Ping,
+	})
 
 	// Запускаем HTTP-сервер.
 	server := httpserver.NewServer(cfg, router)

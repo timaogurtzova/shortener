@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -16,8 +17,8 @@ func TestFileStorePersistsAndRestoresURLs(t *testing.T) {
 	store, err := NewFileStore(storagePath)
 	require.NoError(t, err)
 
-	require.NoError(t, store.Store("abc123", "http://yandex.ru"))
-	require.NoError(t, store.Store("edVPg3ks", "http://ya.ru"))
+	require.NoError(t, store.Store(context.Background(), "abc123", "http://yandex.ru"))
+	require.NoError(t, store.Store(context.Background(), "edVPg3ks", "http://ya.ru"))
 
 	data, err := os.ReadFile(storagePath)
 	require.NoError(t, err)
@@ -39,11 +40,11 @@ func TestFileStorePersistsAndRestoresURLs(t *testing.T) {
 	restoredStore, err := NewFileStore(storagePath)
 	require.NoError(t, err)
 
-	url, err := restoredStore.Load("abc123")
+	url, err := restoredStore.Load(context.Background(), "abc123")
 	require.NoError(t, err)
 	assert.Equal(t, "http://yandex.ru", url)
 
-	url, err = restoredStore.Load("edVPg3ks")
+	url, err = restoredStore.Load(context.Background(), "edVPg3ks")
 	require.NoError(t, err)
 	assert.Equal(t, "http://ya.ru", url)
 }
@@ -69,7 +70,7 @@ func TestFileStoreContinuesUUIDSequenceAfterReload(t *testing.T) {
 	store, err := NewFileStore(storagePath)
 	require.NoError(t, err)
 
-	require.NoError(t, store.Store("newID123", "http://example.com"))
+	require.NoError(t, store.Store(context.Background(), "newID123", "http://example.com"))
 
 	data, err := os.ReadFile(storagePath)
 	require.NoError(t, err)
@@ -88,7 +89,7 @@ func TestFileStoreBatchStorePersistsAndRestoresURLs(t *testing.T) {
 	store, err := NewFileStore(storagePath)
 	require.NoError(t, err)
 
-	err = store.BatchStore([]BatchRecord{
+	err = store.BatchStore(context.Background(), []BatchRecord{
 		{ID: "abc123", OriginalURL: "http://yandex.ru"},
 		{ID: "edVPg3ks", OriginalURL: "http://ya.ru"},
 	})
@@ -114,11 +115,11 @@ func TestFileStoreBatchStorePersistsAndRestoresURLs(t *testing.T) {
 	restoredStore, err := NewFileStore(storagePath)
 	require.NoError(t, err)
 
-	url, err := restoredStore.Load("abc123")
+	url, err := restoredStore.Load(context.Background(), "abc123")
 	require.NoError(t, err)
 	assert.Equal(t, "http://yandex.ru", url)
 
-	url, err = restoredStore.Load("edVPg3ks")
+	url, err = restoredStore.Load(context.Background(), "edVPg3ks")
 	require.NoError(t, err)
 	assert.Equal(t, "http://ya.ru", url)
 }
@@ -129,9 +130,9 @@ func TestFileStoreStoreReturnsConflictForExistingOriginalURL(t *testing.T) {
 	store, err := NewFileStore(storagePath)
 	require.NoError(t, err)
 
-	require.NoError(t, store.Store("abc123", "http://yandex.ru"))
+	require.NoError(t, store.Store(context.Background(), "abc123", "http://yandex.ru"))
 
-	err = store.Store("def456", "http://yandex.ru")
+	err = store.Store(context.Background(), "def456", "http://yandex.ru")
 	require.Error(t, err)
 
 	var conflictErr *URLConflictError

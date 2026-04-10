@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"sync"
 )
 
@@ -20,7 +21,7 @@ func NewInMemoryStore() *InMemoryStore {
 }
 
 // Store сохраняет URL по ID.
-func (s *InMemoryStore) Store(id, url string) error {
+func (s *InMemoryStore) Store(_ context.Context, id, url string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -37,7 +38,7 @@ func (s *InMemoryStore) Store(id, url string) error {
 }
 
 // BatchStore сохраняет пакет URL за одну критическую секцию.
-func (s *InMemoryStore) BatchStore(records []BatchRecord) error {
+func (s *InMemoryStore) BatchStore(_ context.Context, records []BatchRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -69,7 +70,7 @@ func (s *InMemoryStore) BatchStore(records []BatchRecord) error {
 }
 
 // Load возвращает URL по ID.
-func (s *InMemoryStore) Load(id string) (string, error) {
+func (s *InMemoryStore) Load(_ context.Context, id string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

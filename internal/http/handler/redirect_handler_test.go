@@ -34,7 +34,7 @@ func TestRedirectHandler(t *testing.T) {
 			path:   "/abc123",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					ResolveMockFunc: func(id string) (string, error) {
+					ResolveMockFunc: func(ctx context.Context, id string) (string, error) {
 						return "http://localhost", nil
 					},
 				}
@@ -64,7 +64,7 @@ func TestRedirectHandler(t *testing.T) {
 			path:   "/unknown",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					ResolveMockFunc: func(id string) (string, error) {
+					ResolveMockFunc: func(ctx context.Context, id string) (string, error) {
 						return "", errors.New("not found")
 					},
 				}
@@ -85,7 +85,7 @@ func TestRedirectHandler(t *testing.T) {
 				svc = test.mock()
 			} else {
 				svc = &mockURLShortener{
-					ResolveMockFunc: func(id string) (string, error) { return "", nil },
+					ResolveMockFunc: func(ctx context.Context, id string) (string, error) { return "", nil },
 				}
 			}
 

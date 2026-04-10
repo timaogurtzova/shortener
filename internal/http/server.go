@@ -21,6 +21,15 @@ type Server struct {
 	httpServer *http.Server
 }
 
+// RouterHandlers объединяет HTTP-обработчики роутера по именованным полям.
+type RouterHandlers struct {
+	CreateShortURLPlainText http.HandlerFunc
+	CreateShortURLJSON      http.HandlerFunc
+	CreateShortURLBatchJSON http.HandlerFunc
+	Redirect                http.HandlerFunc
+	Ping                    http.HandlerFunc
+}
+
 func NewServer(cfg *config.Configuration, router http.Handler) *Server {
 	return &Server{
 		httpServer: &http.Server{
@@ -33,18 +42,18 @@ func NewServer(cfg *config.Configuration, router http.Handler) *Server {
 	}
 }
 
-func NewRouter(createHandlerFunc, createJSONHandlerFunc, createBatchHandlerFunc, redirectHandlerFunc, pingHandlerFunc http.HandlerFunc) http.Handler {
+func NewRouter(handlers RouterHandlers) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(httpmiddleware.Logging)
 	r.Use(httpmiddleware.GunzipRequest)
 	r.Use(chimiddleware.Compress(5, "application/json", "text/html"))
 	// --- Routes ---
-	r.Post("/", createHandlerFunc)
-	r.Post("/api/shorten", createJSONHandlerFunc)
-	r.Post("/api/shorten/batch", createBatchHandlerFunc)
-	r.Get("/ping", pingHandlerFunc)
-	r.Get("/{id}", redirectHandlerFunc)
+	r.Post("/", handlers.CreateShortURLPlainText)
+	r.Post("/api/shorten", handlers.CreateShortURLJSON)
+	r.Post("/api/shorten/batch", handlers.CreateShortURLBatchJSON)
+	r.Get("/ping", handlers.Ping)
+	r.Get("/{id}", handlers.Redirect)
 
 	// --- Fallback ---
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
