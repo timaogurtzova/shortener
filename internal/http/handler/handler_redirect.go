@@ -25,7 +25,7 @@ func (h *RedirectHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Вызов бизнес-логики
-	originalURL, err := h.service.Resolve(id)
+	originalURL, err := h.service.Resolve(r.Context(), id)
 	if err != nil {
 		http.Error(w, "bad request: id not found", http.StatusBadRequest)
 		return

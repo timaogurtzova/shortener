@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -10,9 +11,10 @@ import (
 )
 
 const (
-	maxBodySize     = 2048
-	contentTypeText = "text/plain"
-	contentTypeJSON = "application/json"
+	maxBodySize      = 2048
+	maxBatchBodySize = 65536
+	contentTypeText  = "text/plain"
+	contentTypeJSON  = "application/json"
 )
 
 type CreateHandler struct {
@@ -47,7 +49,7 @@ func (h *CreateHandler) CreateShortURLPlainText(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	shortURL, err := h.createShortURL(originalURL)
+	shortURL, err := h.createShortURL(r, originalURL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
@@ -55,8 +57,8 @@ func (h *CreateHandler) CreateShortURLPlainText(w http.ResponseWriter, r *http.R
 
 	// Формирование ответа
 	w.Header().Set("Content-Type", contentTypeText)
-	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(shortURL))
+	w.WriteHeader(shortURL.statusCode)
+	w.Write([]byte(shortURL.value))
 }
 
 func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Request) {
@@ -80,13 +82,73 @@ func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	shortURL, err := h.createShortURL(originalURL)
+	shortURL, err := h.createShortURL(r, originalURL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
-	responseBody, err := json.Marshal(shortenResponse{Result: shortURL})
+	responseBody, err := json.Marshal(shortenResponse{Result: shortURL.value})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	w.Header().Set("Content-Type", contentTypeJSON)
+	w.WriteHeader(shortURL.statusCode)
+	w.Write(responseBody)
+}
+
+func (h *CreateHandler) CreateShortURLBatchJSON(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), contentTypeJSON) {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBatchBodySize)
+	defer r.Body.Close()
+
+	var request []batchShortenRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+
+	if len(request) == 0 {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+
+	originalURLs := make([]string, len(request))
+	response := make([]batchShortenResponse, len(request))
+
+	for i, item := range request {
+		correlationID := strings.TrimSpace(item.CorrelationID)
+		originalURL := strings.TrimSpace(item.OriginalURL)
+		if correlationID == "" || originalURL == "" {
+			writeError(w, http.StatusBadRequest, "bad request")
+			return
+		}
+
+		originalURLs[i] = originalURL
+		response[i].CorrelationID = correlationID
+	}
+
+	shortIDs, err := h.service.CreateBatch(r.Context(), originalURLs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if len(shortIDs) != len(request) {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	for i, shortID := range shortIDs {
+		response[i].ShortURL = h.baseURL + "/" + shortID
+	}
+
+	responseBody, err := json.Marshal(response)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
@@ -97,13 +159,28 @@ func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Reques
 	w.Write(responseBody)
 }
 
-func (h *CreateHandler) createShortURL(originalURL string) (string, error) {
-	shortID, err := h.service.Create(originalURL)
+type createShortURLResult struct {
+	value      string
+	statusCode int
+}
+
+func (h *CreateHandler) createShortURL(r *http.Request, originalURL string) (createShortURLResult, error) {
+	shortID, err := h.service.Create(r.Context(), originalURL)
 	if err != nil {
-		return "", err
+		if errors.Is(err, service.ErrURLAlreadyExists) && shortID != "" {
+			return createShortURLResult{
+				value:      h.baseURL + "/" + shortID,
+				statusCode: http.StatusConflict,
+			}, nil
+		}
+
+		return createShortURLResult{}, err
 	}
 
-	return h.baseURL + "/" + shortID, nil
+	return createShortURLResult{
+		value:      h.baseURL + "/" + shortID,
+		statusCode: http.StatusCreated,
+	}, nil
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

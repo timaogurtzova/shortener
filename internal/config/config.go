@@ -13,9 +13,12 @@ import (
 )
 
 type Configuration struct {
-	Server  ServerConfiguration
-	Storage StorageConfiguration
+	Server   ServerConfiguration
+	Storage  StorageConfiguration
+	Database DatabaseConfiguration
 }
+
+const defaultFileStoragePath = "storage.json"
 
 type ServerConfiguration struct {
 	Address      string
@@ -26,7 +29,30 @@ type ServerConfiguration struct {
 }
 
 type StorageConfiguration struct {
-	FileStoragePath string
+	FileStoragePath *string
+}
+
+type DatabaseConfiguration struct {
+	DSN *string
+}
+
+// IsConfigured сообщает, что путь к файловому хранилищу был явно задан через env или CLI.
+func (c StorageConfiguration) IsConfigured() bool {
+	return c.FileStoragePath != nil
+}
+
+// Path возвращает путь к файловому хранилищу или значение по умолчанию.
+func (c StorageConfiguration) Path() string {
+	if c.FileStoragePath == nil {
+		return defaultFileStoragePath
+	}
+
+	return *c.FileStoragePath
+}
+
+// IsConfigured сообщает, что DSN базы данных был явно задан через env или CLI.
+func (c DatabaseConfiguration) IsConfigured() bool {
+	return c.DSN != nil
 }
 
 // defaultConfig возвращает конфигурацию со значениями по умолчанию.
@@ -40,7 +66,10 @@ func defaultConfig() *Configuration {
 			WriteTimeout: 60 * time.Second,
 		},
 		Storage: StorageConfiguration{
-			FileStoragePath: "storage.json",
+			FileStoragePath: nil,
+		},
+		Database: DatabaseConfiguration{
+			DSN: nil,
 		},
 	}
 }
@@ -75,6 +104,7 @@ type cliConfig struct {
 	Address         string
 	BaseURL         string
 	FileStoragePath string
+	DatabaseDSN     string
 }
 
 // envConfig хранит только значения, явно заданные в переменных окружения.
@@ -85,6 +115,7 @@ type envConfig struct {
 	ReadTimeout     *time.Duration `env:"SERVER_READ_TIMEOUT"`
 	WriteTimeout    *time.Duration `env:"SERVER_WRITE_TIMEOUT"`
 	FileStoragePath *string        `env:"FILE_STORAGE_PATH"`
+	DatabaseDSN     *string        `env:"DATABASE_DSN"`
 }
 
 // parseCLIArgs разбирает флаги конфигурации из аргументов командной строки.
@@ -99,6 +130,7 @@ func parseCLIArgs(args []string) (cliConfig, error) {
 	fs.StringVar(&cfg.Address, "a", "", "server address")
 	fs.StringVar(&cfg.BaseURL, "b", "", "base url")
 	fs.StringVar(&cfg.FileStoragePath, "f", "", "file storage path")
+	fs.StringVar(&cfg.DatabaseDSN, "d", "", "database dsn")
 
 	if err := fs.Parse(args); err != nil {
 		return cliConfig{}, err
@@ -111,7 +143,8 @@ func parseCLIArgs(args []string) (cliConfig, error) {
 func applyCLIConfig(cfg *Configuration, cliCfg cliConfig) {
 	cfg.Server.Address = resolveAddress(cfg.Server.Address, cliCfg.Address)
 	cfg.Server.BaseURL = resolveBaseURL(cfg.Server.BaseURL, cliCfg.BaseURL)
-	cfg.Storage.FileStoragePath = resolveFileStoragePath(cfg.Storage.FileStoragePath, cliCfg.FileStoragePath)
+	cfg.Storage.FileStoragePath = resolveFileStoragePath(cliCfg.FileStoragePath)
+	cfg.Database.DSN = resolveDatabaseDSN(cliCfg.DatabaseDSN)
 }
 
 // applyEnvConfig применяет значения из переменных окружения поверх уже собранной конфигурации.
@@ -151,10 +184,19 @@ func applyEnvConfig(cfg *Configuration, envCfg envConfig) {
 
 	if envCfg.FileStoragePath != nil {
 		if *envCfg.FileStoragePath != "" {
-			cfg.Storage.FileStoragePath = *envCfg.FileStoragePath
+			cfg.Storage.FileStoragePath = envCfg.FileStoragePath
 			log.Info().Str("FileStoragePath", *envCfg.FileStoragePath).Msg("Overriding FileStoragePath from environment")
 		} else {
 			log.Warn().Msg("Empty FileStoragePath from environment, using previous value")
+		}
+	}
+
+	if envCfg.DatabaseDSN != nil {
+		if *envCfg.DatabaseDSN != "" {
+			cfg.Database.DSN = envCfg.DatabaseDSN
+			log.Info().Str("DatabaseDSN", *envCfg.DatabaseDSN).Msg("Overriding DatabaseDSN from environment")
+		} else {
+			log.Warn().Msg("Empty DatabaseDSN from environment, using previous value")
 		}
 	}
 }
@@ -187,15 +229,28 @@ func resolveBaseURL(defaultValue, cliValue string) string {
 	return defaultValue
 }
 
-// resolveFileStoragePath выбирает путь к файлу хранилища из флагов или оставляет значение по умолчанию.
-func resolveFileStoragePath(defaultValue, cliValue string) string {
+// resolveFileStoragePath выбирает путь к файлу хранилища из флагов.
+func resolveFileStoragePath(cliValue string) *string {
 	if cliValue != "" {
 		log.Info().Str("FileStoragePath", cliValue).Msg("Overriding FileStoragePath from CLI")
-		return cliValue
+		value := cliValue
+		return &value
 	}
 
-	log.Info().Str("FileStoragePath", defaultValue).Msg("Using default FileStoragePath")
-	return defaultValue
+	log.Info().Str("FileStoragePath", defaultFileStoragePath).Msg("Using default FileStoragePath")
+	return nil
+}
+
+// resolveDatabaseDSN выбирает DSN базы данных из флагов.
+func resolveDatabaseDSN(cliValue string) *string {
+	if cliValue != "" {
+		log.Info().Str("DatabaseDSN", cliValue).Msg("Overriding DatabaseDSN from CLI")
+		value := cliValue
+		return &value
+	}
+
+	log.Info().Str("DatabaseDSN", "").Msg("Using default DatabaseDSN")
+	return nil
 }
 
 // isValidAddress проверяет, что адрес имеет формат host:port.

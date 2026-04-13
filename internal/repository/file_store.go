@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,18 +19,20 @@ type storedURLRecord struct {
 }
 
 type FileStore struct {
-	mu       sync.RWMutex
-	path     string
-	urls     map[string]string
-	records  []storedURLRecord
-	nextUUID int
+	mu            sync.RWMutex
+	path          string
+	urls          map[string]string
+	shortIDsByURL map[string]string
+	records       []storedURLRecord
+	nextUUID      int
 }
 
 func NewFileStore(path string) (*FileStore, error) {
 	store := &FileStore{
-		path:     path,
-		urls:     make(map[string]string),
-		nextUUID: 1,
+		path:          path,
+		urls:          make(map[string]string),
+		shortIDsByURL: make(map[string]string),
+		nextUUID:      1,
 	}
 
 	if err := store.load(); err != nil {
@@ -39,12 +42,15 @@ func NewFileStore(path string) (*FileStore, error) {
 	return store, nil
 }
 
-func (s *FileStore) Store(id, url string) error {
+func (s *FileStore) Store(_ context.Context, id, url string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if _, exists := s.urls[id]; exists {
-		return errors.New("id already exists")
+		return ErrIDAlreadyExists
+	}
+	if shortID, exists := s.shortIDsByURL[url]; exists {
+		return &URLConflictError{ShortID: shortID}
 	}
 
 	record := storedURLRecord{
@@ -54,11 +60,13 @@ func (s *FileStore) Store(id, url string) error {
 	}
 
 	s.urls[id] = url
+	s.shortIDsByURL[url] = id
 	s.records = append(s.records, record)
 	s.nextUUID++
 
 	if err := s.persist(); err != nil {
 		delete(s.urls, id)
+		delete(s.shortIDsByURL, url)
 		s.records = s.records[:len(s.records)-1]
 		s.nextUUID--
 		return err
@@ -67,13 +75,67 @@ func (s *FileStore) Store(id, url string) error {
 	return nil
 }
 
-func (s *FileStore) Load(id string) (string, error) {
+func (s *FileStore) BatchStore(_ context.Context, records []BatchRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	seen := make(map[string]struct{}, len(records))
+	seenOriginalURLs := make(map[string]string, len(records))
+	for _, record := range records {
+		if _, exists := seen[record.ID]; exists {
+			return ErrIDAlreadyExists
+		}
+		if _, exists := s.urls[record.ID]; exists {
+			return ErrIDAlreadyExists
+		}
+		if shortID, exists := s.shortIDsByURL[record.OriginalURL]; exists {
+			return &URLConflictError{ShortID: shortID}
+		}
+		if shortID, exists := seenOriginalURLs[record.OriginalURL]; exists {
+			return &URLConflictError{ShortID: shortID}
+		}
+		seen[record.ID] = struct{}{}
+		seenOriginalURLs[record.OriginalURL] = record.ID
+	}
+
+	initialRecordsLen := len(s.records)
+	initialNextUUID := s.nextUUID
+
+	insertedRecords := make([]BatchRecord, 0, len(records))
+	for _, record := range records {
+		storedRecord := storedURLRecord{
+			UUID:        strconv.Itoa(s.nextUUID),
+			ShortURL:    record.ID,
+			OriginalURL: record.OriginalURL,
+		}
+
+		s.urls[record.ID] = record.OriginalURL
+		s.shortIDsByURL[record.OriginalURL] = record.ID
+		s.records = append(s.records, storedRecord)
+		s.nextUUID++
+		insertedRecords = append(insertedRecords, record)
+	}
+
+	if err := s.persist(); err != nil {
+		for _, record := range insertedRecords {
+			delete(s.urls, record.ID)
+			delete(s.shortIDsByURL, record.OriginalURL)
+		}
+		s.records = s.records[:initialRecordsLen]
+		s.nextUUID = initialNextUUID
+		return err
+	}
+
+	return nil
+}
+
+func (s *FileStore) Load(_ context.Context, id string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	url, ok := s.urls[id]
 	if !ok {
-		return "", errors.New("not found")
+		return "", ErrNotFound
 	}
 
 	return url, nil
@@ -99,9 +161,12 @@ func (s *FileStore) load() error {
 
 	for _, record := range records {
 		if _, exists := s.urls[record.ShortURL]; exists {
-			return fmt.Errorf("duplicate short url in file storage: %s", record.ShortURL)
+			return fmt.Errorf("%w: %s", ErrIDAlreadyExists, record.ShortURL)
 		}
 		s.urls[record.ShortURL] = record.OriginalURL
+		if _, exists := s.shortIDsByURL[record.OriginalURL]; !exists {
+			s.shortIDsByURL[record.OriginalURL] = record.ShortURL
+		}
 	}
 
 	s.records = append(s.records, records...)
