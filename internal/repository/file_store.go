@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/timaogurtzova/shortener/internal/model"
 )
 
 type storedURLRecord struct {
@@ -18,12 +20,32 @@ type storedURLRecord struct {
 	OriginalURL string `json:"original_url"`
 }
 
+type storedUserURLRecord struct {
+	UserID   string `json:"user_id,omitempty"`
+	ShortURL string `json:"short_url"`
+}
+
+type legacyStoredURLRecord struct {
+	UUID        string `json:"uuid"`
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
+	UserID      string `json:"user_id,omitempty"`
+}
+
+type storedFileData struct {
+	URLs     []storedURLRecord     `json:"urls"`
+	UserURLs []storedUserURLRecord `json:"user_urls,omitempty"`
+}
+
 type FileStore struct {
 	mu            sync.RWMutex
 	path          string
 	urls          map[string]string
 	shortIDsByURL map[string]string
+	userShortIDs  map[string][]string
+	userShortSet  map[string]map[string]struct{}
 	records       []storedURLRecord
+	userRecords   []storedUserURLRecord
 	nextUUID      int
 }
 
@@ -32,6 +54,8 @@ func NewFileStore(path string) (*FileStore, error) {
 		path:          path,
 		urls:          make(map[string]string),
 		shortIDsByURL: make(map[string]string),
+		userShortIDs:  make(map[string][]string),
+		userShortSet:  make(map[string]map[string]struct{}),
 		nextUUID:      1,
 	}
 
@@ -42,7 +66,7 @@ func NewFileStore(path string) (*FileStore, error) {
 	return store, nil
 }
 
-func (s *FileStore) Store(_ context.Context, id, url string) error {
+func (s *FileStore) Store(_ context.Context, id, url, userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -50,7 +74,7 @@ func (s *FileStore) Store(_ context.Context, id, url string) error {
 		return ErrIDAlreadyExists
 	}
 	if shortID, exists := s.shortIDsByURL[url]; exists {
-		return &URLConflictError{ShortID: shortID}
+		return s.persistUserAssociation(userID, shortID)
 	}
 
 	record := storedURLRecord{
@@ -63,16 +87,34 @@ func (s *FileStore) Store(_ context.Context, id, url string) error {
 	s.shortIDsByURL[url] = id
 	s.records = append(s.records, record)
 	s.nextUUID++
+	userAssociationAdded := s.addUserAssociation(userID, id)
 
 	if err := s.persist(); err != nil {
 		delete(s.urls, id)
 		delete(s.shortIDsByURL, url)
+		if userAssociationAdded {
+			s.removeUserAssociation(userID, id)
+		}
 		s.records = s.records[:len(s.records)-1]
 		s.nextUUID--
 		return err
 	}
 
 	return nil
+}
+
+func (s *FileStore) persistUserAssociation(userID, shortID string) error {
+	added := s.addUserAssociation(userID, shortID)
+	if !added {
+		return &URLConflictError{ShortID: shortID}
+	}
+
+	if err := s.persist(); err != nil {
+		s.removeUserAssociation(userID, shortID)
+		return err
+	}
+
+	return &URLConflictError{ShortID: shortID}
 }
 
 func (s *FileStore) BatchStore(_ context.Context, records []BatchRecord) error {
@@ -113,6 +155,7 @@ func (s *FileStore) BatchStore(_ context.Context, records []BatchRecord) error {
 		s.shortIDsByURL[record.OriginalURL] = record.ID
 		s.records = append(s.records, storedRecord)
 		s.nextUUID++
+		s.addUserAssociation(record.UserID, record.ID)
 		insertedRecords = append(insertedRecords, record)
 	}
 
@@ -120,6 +163,7 @@ func (s *FileStore) BatchStore(_ context.Context, records []BatchRecord) error {
 		for _, record := range insertedRecords {
 			delete(s.urls, record.ID)
 			delete(s.shortIDsByURL, record.OriginalURL)
+			s.removeUserAssociation(record.UserID, record.ID)
 		}
 		s.records = s.records[:initialRecordsLen]
 		s.nextUUID = initialNextUUID
@@ -141,6 +185,29 @@ func (s *FileStore) Load(_ context.Context, id string) (string, error) {
 	return url, nil
 }
 
+// FindByUserID возвращает все URL, ассоциированные с пользователем.
+func (s *FileStore) FindByUserID(_ context.Context, userID string) ([]model.UserURL, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	shortIDs := s.userShortIDs[userID]
+	result := make([]model.UserURL, 0, len(shortIDs))
+
+	for _, shortID := range shortIDs {
+		originalURL, exists := s.urls[shortID]
+		if !exists {
+			continue
+		}
+
+		result = append(result, model.UserURL{
+			ShortID:     shortID,
+			OriginalURL: originalURL,
+		})
+	}
+
+	return result, nil
+}
+
 func (s *FileStore) load() error {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
@@ -150,28 +217,26 @@ func (s *FileStore) load() error {
 		return err
 	}
 
-	if len(strings.TrimSpace(string(data))) == 0 {
+	trimmedData := strings.TrimSpace(string(data))
+	if trimmedData == "" {
 		return nil
 	}
 
-	var records []storedURLRecord
+	if strings.HasPrefix(trimmedData, "{") {
+		var fileData storedFileData
+		if err := json.Unmarshal(data, &fileData); err != nil {
+			return err
+		}
+
+		return s.loadNormalized(fileData)
+	}
+
+	var records []legacyStoredURLRecord
 	if err := json.Unmarshal(data, &records); err != nil {
 		return err
 	}
 
-	for _, record := range records {
-		if _, exists := s.urls[record.ShortURL]; exists {
-			return fmt.Errorf("%w: %s", ErrIDAlreadyExists, record.ShortURL)
-		}
-		s.urls[record.ShortURL] = record.OriginalURL
-		if _, exists := s.shortIDsByURL[record.OriginalURL]; !exists {
-			s.shortIDsByURL[record.OriginalURL] = record.ShortURL
-		}
-	}
-
-	s.records = append(s.records, records...)
-	s.nextUUID = nextUUID(records)
-	return nil
+	return s.loadLegacy(records)
 }
 
 func (s *FileStore) persist() error {
@@ -192,7 +257,10 @@ func (s *FileStore) persist() error {
 
 	encoder := json.NewEncoder(tmpFile)
 	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(s.records); err != nil {
+	if err := encoder.Encode(storedFileData{
+		URLs:     s.records,
+		UserURLs: s.userRecords,
+	}); err != nil {
 		_ = tmpFile.Close()
 		return err
 	}
@@ -202,6 +270,69 @@ func (s *FileStore) persist() error {
 	}
 
 	return os.Rename(tmpName, s.path)
+}
+
+func (s *FileStore) addUserAssociation(userID, shortID string) bool {
+	if userID == "" || shortID == "" {
+		return false
+	}
+
+	if _, exists := s.userShortSet[userID]; !exists {
+		s.userShortSet[userID] = make(map[string]struct{})
+	}
+
+	if _, exists := s.userShortSet[userID][shortID]; exists {
+		return false
+	}
+
+	s.userShortSet[userID][shortID] = struct{}{}
+	s.userShortIDs[userID] = append(s.userShortIDs[userID], shortID)
+	s.userRecords = append(s.userRecords, storedUserURLRecord{
+		UserID:   userID,
+		ShortURL: shortID,
+	})
+	return true
+}
+
+func (s *FileStore) removeUserAssociation(userID, shortID string) {
+	if userID == "" || shortID == "" {
+		return
+	}
+
+	userShortSet, exists := s.userShortSet[userID]
+	if !exists {
+		return
+	}
+
+	if _, exists := userShortSet[shortID]; !exists {
+		return
+	}
+
+	delete(userShortSet, shortID)
+	shortIDs := s.userShortIDs[userID]
+	for i, existingShortID := range shortIDs {
+		if existingShortID != shortID {
+			continue
+		}
+
+		s.userShortIDs[userID] = append(shortIDs[:i], shortIDs[i+1:]...)
+		break
+	}
+
+	if len(userShortSet) == 0 {
+		delete(s.userShortSet, userID)
+		delete(s.userShortIDs, userID)
+	}
+
+	for i := len(s.userRecords) - 1; i >= 0; i-- {
+		record := s.userRecords[i]
+		if record.UserID != userID || record.ShortURL != shortID {
+			continue
+		}
+
+		s.userRecords = append(s.userRecords[:i], s.userRecords[i+1:]...)
+		break
+	}
 }
 
 func nextUUID(records []storedURLRecord) int {
@@ -218,4 +349,87 @@ func nextUUID(records []storedURLRecord) int {
 	}
 
 	return maxUUID + 1
+}
+
+func nextUUIDFromLegacy(records []legacyStoredURLRecord) int {
+	maxUUID := len(records)
+
+	for _, record := range records {
+		uuid, err := strconv.Atoi(record.UUID)
+		if err != nil {
+			continue
+		}
+		if uuid > maxUUID {
+			maxUUID = uuid
+		}
+	}
+
+	return maxUUID + 1
+}
+
+func (s *FileStore) loadNormalized(data storedFileData) error {
+	for _, record := range data.URLs {
+		if err := s.loadURLRecord(record); err != nil {
+			return err
+		}
+	}
+
+	for _, record := range data.UserURLs {
+		if _, exists := s.urls[record.ShortURL]; !exists {
+			return fmt.Errorf("user association references unknown short url: %s", record.ShortURL)
+		}
+
+		s.addUserAssociation(record.UserID, record.ShortURL)
+	}
+
+	s.records = append(s.records, data.URLs...)
+	s.nextUUID = nextUUID(data.URLs)
+	return nil
+}
+
+func (s *FileStore) loadLegacy(records []legacyStoredURLRecord) error {
+	normalizedRecords := make([]storedURLRecord, 0, len(records))
+
+	for _, record := range records {
+		if _, exists := s.urls[record.ShortURL]; !exists {
+			normalizedRecord := storedURLRecord{
+				UUID:        record.UUID,
+				ShortURL:    record.ShortURL,
+				OriginalURL: record.OriginalURL,
+			}
+			if err := s.loadURLRecord(normalizedRecord); err != nil {
+				return err
+			}
+
+			normalizedRecords = append(normalizedRecords, normalizedRecord)
+		} else if s.urls[record.ShortURL] != record.OriginalURL {
+			return fmt.Errorf("%w: %s", ErrIDAlreadyExists, record.ShortURL)
+		}
+
+		s.addUserAssociation(record.UserID, record.ShortURL)
+	}
+
+	s.records = append(s.records, normalizedRecords...)
+	s.nextUUID = nextUUIDFromLegacy(records)
+	return nil
+}
+
+func (s *FileStore) loadURLRecord(record storedURLRecord) error {
+	if existingOriginalURL, exists := s.urls[record.ShortURL]; exists {
+		if existingOriginalURL != record.OriginalURL {
+			return fmt.Errorf("%w: %s", ErrIDAlreadyExists, record.ShortURL)
+		}
+		return nil
+	}
+
+	if existingShortID, exists := s.shortIDsByURL[record.OriginalURL]; exists && existingShortID != record.ShortURL {
+		return &URLConflictError{ShortID: existingShortID}
+	}
+
+	s.urls[record.ShortURL] = record.OriginalURL
+	if _, exists := s.shortIDsByURL[record.OriginalURL]; !exists {
+		s.shortIDsByURL[record.OriginalURL] = record.ShortURL
+	}
+
+	return nil
 }

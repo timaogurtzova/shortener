@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/timaogurtzova/shortener/internal/model"
 	"github.com/timaogurtzova/shortener/internal/repository"
 )
 
@@ -27,14 +28,14 @@ func NewShortenerService(repo repository.URLRepository) *ShortenerService {
 }
 
 // Create сохраняет URL и возвращает сгенерированный ID
-func (s *ShortenerService) Create(ctx context.Context, url string) (string, error) {
+func (s *ShortenerService) Create(ctx context.Context, url, userID string) (string, error) {
 	for i := 0; i < maxGenerateAttempts; i++ {
 		id, err := GenerateID(8)
 		if err != nil {
 			return "", err
 		}
 
-		err = s.repo.Store(ctx, id, url)
+		err = s.repo.Store(ctx, id, url, userID)
 		if err == nil {
 			return id, nil
 		}
@@ -52,13 +53,13 @@ func (s *ShortenerService) Create(ctx context.Context, url string) (string, erro
 }
 
 // CreateBatch сохраняет пакет URL и возвращает сгенерированные ID в исходном порядке.
-func (s *ShortenerService) CreateBatch(ctx context.Context, urls []string) ([]string, error) {
+func (s *ShortenerService) CreateBatch(ctx context.Context, urls []string, userID string) ([]string, error) {
 	if len(urls) == 0 {
 		return nil, errors.New("empty batch")
 	}
 
 	for i := 0; i < maxGenerateAttempts; i++ {
-		records, ids, err := buildBatchRecords(urls)
+		records, ids, err := buildBatchRecords(urls, userID)
 		if err != nil {
 			return nil, err
 		}
@@ -81,6 +82,11 @@ func (s *ShortenerService) Resolve(ctx context.Context, id string) (string, erro
 	return s.repo.Load(ctx, id)
 }
 
+// FindByUserID возвращает все URL, сокращённые пользователем.
+func (s *ShortenerService) FindByUserID(ctx context.Context, userID string) ([]model.UserURL, error) {
+	return s.repo.FindByUserID(ctx, userID)
+}
+
 // GenerateID создаёт случайный ID длиной n
 func GenerateID(n int) (string, error) {
 	var result strings.Builder
@@ -97,7 +103,7 @@ func GenerateID(n int) (string, error) {
 	return result.String(), nil
 }
 
-func buildBatchRecords(urls []string) ([]repository.BatchRecord, []string, error) {
+func buildBatchRecords(urls []string, userID string) ([]repository.BatchRecord, []string, error) {
 	records := make([]repository.BatchRecord, len(urls))
 	ids := make([]string, len(urls))
 	usedIDs := make(map[string]struct{}, len(urls))
@@ -113,6 +119,7 @@ func buildBatchRecords(urls []string) ([]repository.BatchRecord, []string, error
 		records[i] = repository.BatchRecord{
 			ID:          id,
 			OriginalURL: originalURL,
+			UserID:      userID,
 		}
 	}
 

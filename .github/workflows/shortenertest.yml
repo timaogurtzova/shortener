@@ -18,7 +18,7 @@ jobs:
 
   shortenertest:
     runs-on: ubuntu-latest
-    container: golang:1.24
+    container: golang:1.25
     needs: branchtest
 
     env:
@@ -41,24 +41,27 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Download autotests binaries
-        uses: robinraju/release-downloader@v1.8
-        with:
-          repository: Yandex-Practicum/go-autotests
-          latest: true
-          fileName: "*"
-          out-file-path: .tools
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/.tools
+          AUTOTESTS_DIR=$(go mod download -json github.com/Yandex-Practicum/go-autotests@v0.13.4 | awk -F'"' '/"Dir":/ {print $4}')
+          echo "AUTOTESTS_DIR=$AUTOTESTS_DIR" >> $GITHUB_ENV
 
       - name: Setup autotest binary
         run: |
+          cd "$AUTOTESTS_DIR/cmd/shortenertestbeta"
+          go test -c -o $GITHUB_WORKSPACE/.tools/shortenertestbeta
+          cd "$AUTOTESTS_DIR/cmd/random"
+          go build -o $GITHUB_WORKSPACE/.tools/random
+          cd "$AUTOTESTS_DIR/cmd/wipedb"
+          go build -o $GITHUB_WORKSPACE/.tools/wipedb
           chmod -R +x $GITHUB_WORKSPACE/.tools
-          mv $GITHUB_WORKSPACE/.tools/shortenertest_v2 /usr/local/bin/shortenertest
+          mv $GITHUB_WORKSPACE/.tools/shortenertestbeta /usr/local/bin/shortenertestbeta
           mv $GITHUB_WORKSPACE/.tools/random /usr/local/bin/random
           mv $GITHUB_WORKSPACE/.tools/wipedb /usr/local/bin/wipedb
 
       - name: Setup go deps
         run: |
-          go install golang.org/x/tools/cmd/goimports@v0.42.0
+          go install golang.org/x/tools/cmd/goimports@latest
 
       - name: Build server binary
         run: |
@@ -93,7 +96,7 @@ jobs:
           github.head_ref == 'iter23' ||
           github.head_ref == 'iter24'
         run: |
-          shortenertest -test.v -test.run=^TestIteration1$ \
+          shortenertestbeta -test.v -test.run=^TestIteration1$ \
               -binary-path=cmd/shortener/shortener
 
       - name: "Code increment #2"
@@ -123,7 +126,7 @@ jobs:
           github.head_ref == 'iter23' ||
           github.head_ref == 'iter24'
         run: |
-          shortenertest -test.v -test.run=^TestIteration2$ -source-path=.
+          shortenertestbeta -test.v -test.run=^TestIteration2$ -source-path=.
 
       - name: "Code increment #3"
         if: |
@@ -151,7 +154,7 @@ jobs:
           github.head_ref == 'iter23' ||
           github.head_ref == 'iter24'
         run: |
-          shortenertest -test.v -test.run=^TestIteration3$ -source-path=.
+          shortenertestbeta -test.v -test.run=^TestIteration3$ -source-path=.
 
       - name: "Code increment #4"
         if: |
@@ -179,7 +182,7 @@ jobs:
           github.head_ref == 'iter24'
         run: |
           SERVER_PORT=$(random unused-port)
-          shortenertest -test.v -test.run=^TestIteration4$ \
+          shortenertestbeta -test.v -test.run=^TestIteration4$ \
               -binary-path=cmd/shortener/shortener \
               -server-port=$SERVER_PORT
 
@@ -208,7 +211,7 @@ jobs:
           github.head_ref == 'iter24'
         run: |
           SERVER_PORT=$(random unused-port)
-          shortenertest -test.v -test.run=^TestIteration5$ \
+          shortenertestbeta -test.v -test.run=^TestIteration5$ \
               -binary-path=cmd/shortener/shortener \
               -server-port=$SERVER_PORT
 
@@ -235,7 +238,7 @@ jobs:
           github.head_ref == 'iter23' ||
           github.head_ref == 'iter24'
         run: |
-          shortenertest -test.v -test.run=^TestIteration6$ \
+          shortenertestbeta -test.v -test.run=^TestIteration6$ \
               -source-path=.
 
       - name: "Code increment #7"
@@ -260,7 +263,7 @@ jobs:
           github.head_ref == 'iter23' ||
           github.head_ref == 'iter24'
         run: |
-          shortenertest -test.v -test.run=^TestIteration7$ \
+          shortenertestbeta -test.v -test.run=^TestIteration7$ \
               -binary-path=cmd/shortener/shortener \
               -source-path=.
 
@@ -285,7 +288,7 @@ jobs:
           github.head_ref == 'iter23' ||
           github.head_ref == 'iter24'
         run: |
-          shortenertest -test.v -test.run=^TestIteration8$ \
+          shortenertestbeta -test.v -test.run=^TestIteration8$ \
               -binary-path=cmd/shortener/shortener
 
       - name: "Code increment #9"
@@ -309,7 +312,7 @@ jobs:
           github.head_ref == 'iter24'
         run: |
           TEMP_FILE=$(random tempfile)
-          shortenertest -test.v -test.run=^TestIteration9$ \
+          shortenertestbeta -test.v -test.run=^TestIteration9$ \
               -binary-path=cmd/shortener/shortener \
               -source-path=. \
               -file-storage-path=$TEMP_FILE
@@ -333,7 +336,7 @@ jobs:
           github.head_ref == 'iter23' ||
           github.head_ref == 'iter24'
         run: |
-          shortenertest -test.v -test.run=^TestIteration10$ \
+          shortenertestbeta -test.v -test.run=^TestIteration10$ \
               -binary-path=cmd/shortener/shortener \
               -source-path=. \
               -database-dsn=$DATABASE_CONN_STRING
@@ -357,7 +360,7 @@ jobs:
           github.head_ref == 'iter23' ||
           github.head_ref == 'iter24'
         run: |
-          shortenertest -test.v -test.run=^TestIteration11$ \
+          shortenertestbeta -test.v -test.run=^TestIteration11$ \
               -binary-path=cmd/shortener/shortener \
               -database-dsn=$DATABASE_CONN_STRING
           wipedb $DATABASE_CONN_STRING
@@ -379,7 +382,7 @@ jobs:
           github.head_ref == 'iter23' ||
           github.head_ref == 'iter24'
         run: |
-          shortenertest -test.v -test.run=^TestIteration12$ \
+          shortenertestbeta -test.v -test.run=^TestIteration12$ \
               -binary-path=cmd/shortener/shortener \
               -database-dsn=$DATABASE_CONN_STRING
           wipedb $DATABASE_CONN_STRING
@@ -400,7 +403,7 @@ jobs:
           github.head_ref == 'iter23' ||
           github.head_ref == 'iter24'
         run: |
-          shortenertest -test.v -test.run=^TestIteration13$ \
+          shortenertestbeta -test.v -test.run=^TestIteration13$ \
               -binary-path=cmd/shortener/shortener \
               -database-dsn=$DATABASE_CONN_STRING
           wipedb $DATABASE_CONN_STRING
@@ -420,7 +423,7 @@ jobs:
           github.head_ref == 'iter23' ||
           github.head_ref == 'iter24'
         run: |
-          shortenertest -test.v -test.run=^TestIteration14$ \
+          shortenertestbeta -test.v -test.run=^TestIteration14$ \
               -binary-path=cmd/shortener/shortener \
               -database-dsn=$DATABASE_CONN_STRING
           wipedb $DATABASE_CONN_STRING
@@ -439,7 +442,7 @@ jobs:
           github.head_ref == 'iter23' ||
           github.head_ref == 'iter24'
         run: |
-          shortenertest -test.v -test.run=^TestIteration15$ \
+          shortenertestbeta -test.v -test.run=^TestIteration15$ \
               -binary-path=cmd/shortener/shortener \
               -database-dsn=$DATABASE_CONN_STRING
           wipedb $DATABASE_CONN_STRING
@@ -457,7 +460,7 @@ jobs:
           github.head_ref == 'iter23' ||
           github.head_ref == 'iter24'
         run: |
-          shortenertest -test.v -test.run=^TestIteration16$ \
+          shortenertestbeta -test.v -test.run=^TestIteration16$ \
               -source-path=. \
 
       - name: "Code increment #17"
@@ -472,7 +475,7 @@ jobs:
           github.head_ref == 'iter23' ||
           github.head_ref == 'iter24'
         run: |
-          shortenertest -test.v -test.run=^TestIteration17$ \
+          shortenertestbeta -test.v -test.run=^TestIteration17$ \
               -source-path=. \
 
       - name: "Code increment #18"
@@ -486,5 +489,5 @@ jobs:
           github.head_ref == 'iter23' ||
           github.head_ref == 'iter24'
         run: |
-          shortenertest -test.v -test.run=^TestIteration18$ \
+          shortenertestbeta -test.v -test.run=^TestIteration18$ \
               -source-path=. \

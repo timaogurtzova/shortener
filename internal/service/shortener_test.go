@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/timaogurtzova/shortener/internal/model"
 	"github.com/timaogurtzova/shortener/internal/repository"
 	"github.com/timaogurtzova/shortener/internal/service"
 )
@@ -13,14 +14,15 @@ import (
 func TestShortenerService_Create(t *testing.T) {
 	tests := []struct {
 		name          string
-		mockStoreFunc func(ctx context.Context, id, url string) error
+		mockStoreFunc func(ctx context.Context, id, url, userID string) error
 		wantID        string
 		wantErr       bool
 		wantConflict  bool
 	}{
 		{
 			name: "успешное создание",
-			mockStoreFunc: func(ctx context.Context, id, url string) error {
+			mockStoreFunc: func(ctx context.Context, id, url, userID string) error {
+				assert.Equal(t, "user-1", userID)
 				return nil
 			},
 			wantErr:      false,
@@ -28,7 +30,7 @@ func TestShortenerService_Create(t *testing.T) {
 		},
 		{
 			name: "ошибка при сохранении",
-			mockStoreFunc: func(ctx context.Context, id, url string) error {
+			mockStoreFunc: func(ctx context.Context, id, url, userID string) error {
 				return errors.New("store error")
 			},
 			wantErr:      true,
@@ -36,7 +38,7 @@ func TestShortenerService_Create(t *testing.T) {
 		},
 		{
 			name: "исходный url уже сокращён",
-			mockStoreFunc: func(ctx context.Context, id, url string) error {
+			mockStoreFunc: func(ctx context.Context, id, url, userID string) error {
 				return &repository.URLConflictError{ShortID: "abc123"}
 			},
 			wantID:       "abc123",
@@ -52,7 +54,7 @@ func TestShortenerService_Create(t *testing.T) {
 			}
 			svc := service.NewShortenerService(mockRepo)
 
-			id, err := svc.Create(context.Background(), "https://example.com")
+			id, err := svc.Create(context.Background(), "https://example.com", "user-1")
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.wantConflict {
@@ -151,7 +153,7 @@ func TestShortenerService_CreateBatch(t *testing.T) {
 			}
 			svc := service.NewShortenerService(mockRepo)
 
-			ids, err := svc.CreateBatch(context.Background(), tt.urls)
+			ids, err := svc.CreateBatch(context.Background(), tt.urls, "user-1")
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
@@ -164,4 +166,23 @@ func TestShortenerService_CreateBatch(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestShortenerService_FindByUserID(t *testing.T) {
+	expected := []model.UserURL{
+		{ShortID: "abc123", OriginalURL: "https://example.com"},
+	}
+
+	mockRepo := &mockURLRepository{
+		findByUserFunc: func(ctx context.Context, userID string) ([]model.UserURL, error) {
+			assert.Equal(t, "user-1", userID)
+			return expected, nil
+		},
+	}
+
+	svc := service.NewShortenerService(mockRepo)
+
+	actual, err := svc.FindByUserID(context.Background(), "user-1")
+	assert.NoError(t, err)
+	assert.Equal(t, expected, actual)
 }

@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"errors"
+
+	"github.com/timaogurtzova/shortener/internal/model"
 )
 
 var (
@@ -28,11 +30,13 @@ func (e *URLConflictError) Unwrap() error {
 type BatchRecord struct {
 	ID          string
 	OriginalURL string
+	UserID      string
 }
 
 // URLRepository описывает контракт хранилища URL.
 type URLRepository interface {
-	Store(ctx context.Context, id, url string) error
+	Store(ctx context.Context, id, url, userID string) error
 	BatchStore(ctx context.Context, records []BatchRecord) error
 	Load(ctx context.Context, id string) (string, error)
+	FindByUserID(ctx context.Context, userID string) ([]model.UserURL, error)
 }
