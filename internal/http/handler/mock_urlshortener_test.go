@@ -9,10 +9,11 @@ import (
 
 // реализует интерфейс URLShortener для тестов
 type mockURLShortener struct {
-	CreateMockFunc       func(context.Context, string, string) (string, error)
-	CreateBatchMockFunc  func(context.Context, []string, string) ([]string, error)
-	ResolveMockFunc      func(context.Context, string) (string, error)
-	FindByUserIDMockFunc func(context.Context, string) ([]model.UserURL, error)
+	CreateMockFunc         func(context.Context, string, string) (string, error)
+	CreateBatchMockFunc    func(context.Context, []string, string) ([]string, error)
+	ResolveMockFunc        func(context.Context, string) (string, error)
+	FindByUserIDMockFunc   func(context.Context, string) ([]model.UserURL, error)
+	DeleteUserURLsMockFunc func(context.Context, string, []string) error
 }
 
 func (m *mockURLShortener) Create(ctx context.Context, url, userID string) (string, error) {
@@ -41,4 +42,11 @@ func (m *mockURLShortener) FindByUserID(ctx context.Context, userID string) ([]m
 		return m.FindByUserIDMockFunc(ctx, userID)
 	}
 	return nil, errors.New("not implemented")
+}
+
+func (m *mockURLShortener) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
+	if m.DeleteUserURLsMockFunc != nil {
+		return m.DeleteUserURLsMockFunc(ctx, userID, shortIDs)
+	}
+	return errors.New("not implemented")
 }

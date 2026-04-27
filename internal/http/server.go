@@ -27,6 +27,7 @@ type RouterHandlers struct {
 	CreateShortURLJSON      http.HandlerFunc
 	CreateShortURLBatchJSON http.HandlerFunc
 	GetUserURLs             http.HandlerFunc
+	DeleteUserURLs          http.HandlerFunc
 	Redirect                http.HandlerFunc
 	Ping                    http.HandlerFunc
 }
@@ -54,6 +55,7 @@ func NewRouter(handlers RouterHandlers) http.Handler {
 	r.Post("/api/shorten", handlers.CreateShortURLJSON)
 	r.Post("/api/shorten/batch", handlers.CreateShortURLBatchJSON)
 	r.Get("/api/user/urls", handlers.GetUserURLs)
+	r.Delete("/api/user/urls", handlers.DeleteUserURLs)
 	r.Get("/ping", handlers.Ping)
 	r.Get("/{id}", handlers.Redirect)
 

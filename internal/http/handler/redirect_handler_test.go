@@ -76,6 +76,24 @@ func TestRedirectHandler(t *testing.T) {
 				contentType: "text/plain; charset=utf-8",
 			},
 		},
+		{
+			name:   "id удалён",
+			method: http.MethodGet,
+			path:   "/deleted",
+			mock: func() *mockURLShortener {
+				return &mockURLShortener{
+					ResolveMockFunc: func(ctx context.Context, id string) (string, error) {
+						return "", service.ErrURLDeleted
+					},
+				}
+			},
+			want: want{
+				code:        http.StatusGone,
+				location:    "",
+				body:        "gone\n",
+				contentType: "text/plain; charset=utf-8",
+			},
+		},
 	}
 
 	for _, test := range tests {

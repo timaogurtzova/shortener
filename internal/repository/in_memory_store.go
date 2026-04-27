@@ -11,6 +11,7 @@ import (
 type InMemoryStore struct {
 	mu            sync.RWMutex
 	store         map[string]string
+	deletedShorts map[string]struct{}
 	shortIDsByURL map[string]string
 	userShortIDs  map[string][]string
 	userShortSet  map[string]map[string]struct{}
@@ -20,6 +21,7 @@ type InMemoryStore struct {
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
 		store:         make(map[string]string),
+		deletedShorts: make(map[string]struct{}),
 		shortIDsByURL: make(map[string]string),
 		userShortIDs:  make(map[string][]string),
 		userShortSet:  make(map[string]map[string]struct{}),
@@ -87,6 +89,9 @@ func (s *InMemoryStore) Load(_ context.Context, id string) (string, error) {
 	if !ok {
 		return "", ErrNotFound
 	}
+	if _, deleted := s.deletedShorts[id]; deleted {
+		return "", ErrDeleted
+	}
 
 	return v, nil
 }
@@ -112,6 +117,31 @@ func (s *InMemoryStore) FindByUserID(_ context.Context, userID string) ([]model.
 	}
 
 	return result, nil
+}
+
+// MarkDeleted помечает принадлежащие пользователю короткие URL как удалённые.
+func (s *InMemoryStore) MarkDeleted(_ context.Context, userID string, shortIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ownedShortIDs := s.userShortSet[userID]
+	if len(ownedShortIDs) == 0 {
+		return nil
+	}
+
+	for _, shortID := range shortIDs {
+		if _, exists := ownedShortIDs[shortID]; !exists {
+			continue
+		}
+
+		if _, exists := s.store[shortID]; !exists {
+			continue
+		}
+
+		s.deletedShorts[shortID] = struct{}{}
+	}
+
+	return nil
 }
 
 func (s *InMemoryStore) associateUserWithShortID(userID, shortID string) {

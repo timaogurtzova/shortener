@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -27,6 +28,11 @@ func (h *RedirectHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 	// Вызов бизнес-логики
 	originalURL, err := h.service.Resolve(r.Context(), id)
 	if err != nil {
+		if errors.Is(err, service.ErrURLDeleted) {
+			http.Error(w, "gone", http.StatusGone)
+			return
+		}
+
 		http.Error(w, "bad request: id not found", http.StatusBadRequest)
 		return
 	}

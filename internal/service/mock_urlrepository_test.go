@@ -10,10 +10,11 @@ import (
 
 // mockURLRepository реализует repository.URLRepository для тестов
 type mockURLRepository struct {
-	storeFunc      func(ctx context.Context, id, url, userID string) error
-	batchStoreFunc func(ctx context.Context, records []repository.BatchRecord) error
-	loadFunc       func(ctx context.Context, id string) (string, error)
-	findByUserFunc func(ctx context.Context, userID string) ([]model.UserURL, error)
+	storeFunc       func(ctx context.Context, id, url, userID string) error
+	batchStoreFunc  func(ctx context.Context, records []repository.BatchRecord) error
+	loadFunc        func(ctx context.Context, id string) (string, error)
+	findByUserFunc  func(ctx context.Context, userID string) ([]model.UserURL, error)
+	markDeletedFunc func(ctx context.Context, userID string, shortIDs []string) error
 }
 
 func (m *mockURLRepository) Store(ctx context.Context, id, url, userID string) error {
@@ -42,4 +43,11 @@ func (m *mockURLRepository) FindByUserID(ctx context.Context, userID string) ([]
 		return m.findByUserFunc(ctx, userID)
 	}
 	return nil, errors.New("not implemented")
+}
+
+func (m *mockURLRepository) MarkDeleted(ctx context.Context, userID string, shortIDs []string) error {
+	if m.markDeletedFunc != nil {
+		return m.markDeletedFunc(ctx, userID, shortIDs)
+	}
+	return nil
 }

@@ -50,3 +50,14 @@ func TestInMemoryStoreStoreReturnsConflictForExistingOriginalURL(t *testing.T) {
 	require.Len(t, userURLs, 1)
 	assert.Equal(t, "abc123", userURLs[0].ShortID)
 }
+
+func TestInMemoryStoreMarkDeleted(t *testing.T) {
+	store := repository.NewInMemoryStore()
+
+	require.NoError(t, store.Store(context.Background(), "abc123", "http://yandex.ru", "user-1"))
+	require.NoError(t, store.MarkDeleted(context.Background(), "user-1", []string{"abc123"}))
+
+	_, err := store.Load(context.Background(), "abc123")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, repository.ErrDeleted)
+}

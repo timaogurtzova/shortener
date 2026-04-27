@@ -27,7 +27,7 @@ const (
 		LIMIT 1
 	`
 	selectOriginalURLQuery = `
-		SELECT original_url
+		SELECT original_url, is_deleted
 		FROM short_urls
 		WHERE short_url = $1
 	`
@@ -42,6 +42,14 @@ const (
 		JOIN short_urls ON short_urls.short_url = user_urls.short_url
 		WHERE user_urls.user_id = $1
 		ORDER BY user_urls.id
+	`
+	markDeletedQuery = `
+		UPDATE short_urls AS su
+		SET is_deleted = TRUE
+		FROM user_urls AS uu
+		WHERE su.short_url = uu.short_url
+		  AND uu.user_id = $1
+		  AND su.short_url = ANY($2)
 	`
 )
 
@@ -134,9 +142,14 @@ func (s *DBStore) BatchStore(ctx context.Context, records []BatchRecord) error {
 // Load возвращает исходный URL по короткому идентификатору.
 func (s *DBStore) Load(ctx context.Context, id string) (string, error) {
 	var originalURL string
+	var deleted bool
 
-	err := s.db.QueryRowContext(ctx, selectOriginalURLQuery, id).Scan(&originalURL)
+	err := s.db.QueryRowContext(ctx, selectOriginalURLQuery, id).Scan(&originalURL, &deleted)
 	if err == nil {
+		if deleted {
+			return "", ErrDeleted
+		}
+
 		return originalURL, nil
 	}
 
@@ -170,6 +183,16 @@ func (s *DBStore) FindByUserID(ctx context.Context, userID string) ([]model.User
 	}
 
 	return result, nil
+}
+
+// MarkDeleted помечает принадлежащие пользователю короткие URL как удалённые.
+func (s *DBStore) MarkDeleted(ctx context.Context, userID string, shortIDs []string) error {
+	if userID == "" || len(shortIDs) == 0 {
+		return nil
+	}
+
+	_, err := s.db.ExecContext(ctx, markDeletedQuery, userID, pq.Array(shortIDs))
+	return err
 }
 
 func (s *DBStore) storeUserURL(ctx context.Context, tx *sql.Tx, userID, shortID string) error {

@@ -68,6 +68,7 @@ func run() error {
 		CreateShortURLJSON:      createHandler.CreateShortURLJSON,
 		CreateShortURLBatchJSON: createHandler.CreateShortURLBatchJSON,
 		GetUserURLs:             userHandler.GetUserURLs,
+		DeleteUserURLs:          userHandler.DeleteUserURLs,
 		Redirect:                redirectHandler.Redirect,
 		Ping:                    pingHandler.Ping,
 	})

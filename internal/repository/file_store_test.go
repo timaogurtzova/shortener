@@ -252,3 +252,24 @@ func TestFileStoreLoadsLegacyArrayFormatWithoutDuplicatingURLs(t *testing.T) {
 		{UserID: "user-3", ShortURL: "new12345"},
 	}, fileData.UserURLs)
 }
+
+func TestFileStoreMarkDeleted(t *testing.T) {
+	storagePath := filepath.Join(t.TempDir(), "storage.json")
+
+	store, err := repository.NewFileStore(storagePath)
+	require.NoError(t, err)
+
+	require.NoError(t, store.Store(context.Background(), "abc123", "http://yandex.ru", "user-1"))
+	require.NoError(t, store.MarkDeleted(context.Background(), "user-1", []string{"abc123"}))
+
+	_, err = store.Load(context.Background(), "abc123")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, repository.ErrDeleted)
+
+	restoredStore, err := repository.NewFileStore(storagePath)
+	require.NoError(t, err)
+
+	_, err = restoredStore.Load(context.Background(), "abc123")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, repository.ErrDeleted)
+}

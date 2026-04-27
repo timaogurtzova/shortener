@@ -12,6 +12,7 @@ type URLShortener interface {
 	CreateBatch(ctx context.Context, urls []string, userID string) ([]string, error)
 	Resolve(ctx context.Context, id string) (string, error)
 	FindByUserID(ctx context.Context, userID string) ([]model.UserURL, error)
+	DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error
 }
 
 // HealthChecker описывает проверку доступности внешних зависимостей сервиса.

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/timaogurtzova/shortener/internal/model"
 	"github.com/timaogurtzova/shortener/internal/repository"
 	"github.com/timaogurtzova/shortener/internal/service"
@@ -92,6 +94,14 @@ func TestShortenerService_Resolve(t *testing.T) {
 			wantURL: "",
 			wantErr: true,
 		},
+		{
+			name: "id удалён",
+			mockLoad: func(ctx context.Context, id string) (string, error) {
+				return "", repository.ErrDeleted
+			},
+			wantURL: "",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -104,6 +114,9 @@ func TestShortenerService_Resolve(t *testing.T) {
 			url, err := svc.Resolve(context.Background(), "abc123")
 			if tt.wantErr {
 				assert.Error(t, err)
+				if tt.name == "id удалён" {
+					assert.ErrorIs(t, err, service.ErrURLDeleted)
+				}
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.wantURL, url)
@@ -185,4 +198,26 @@ func TestShortenerService_FindByUserID(t *testing.T) {
 	actual, err := svc.FindByUserID(context.Background(), "user-1")
 	assert.NoError(t, err)
 	assert.Equal(t, expected, actual)
+}
+
+func TestShortenerService_DeleteUserURLs(t *testing.T) {
+	called := make(chan []string, 1)
+
+	mockRepo := &mockURLRepository{
+		markDeletedFunc: func(ctx context.Context, userID string, shortIDs []string) error {
+			assert.Equal(t, "user-1", userID)
+			called <- shortIDs
+			return nil
+		},
+	}
+
+	svc := service.NewShortenerService(mockRepo)
+	require.NoError(t, svc.DeleteUserURLs(context.Background(), "user-1", []string{"abc123", "def456", "abc123"}))
+
+	select {
+	case shortIDs := <-called:
+		assert.ElementsMatch(t, []string{"abc123", "def456"}, shortIDs)
+	case <-time.After(time.Second):
+		t.Fatal("delete request was not processed asynchronously")
+	}
 }

@@ -18,6 +18,7 @@ type storedURLRecord struct {
 	UUID        string `json:"uuid"`
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
+	DeletedFlag bool   `json:"is_deleted,omitempty"`
 }
 
 type storedUserURLRecord struct {
@@ -30,6 +31,7 @@ type legacyStoredURLRecord struct {
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
 	UserID      string `json:"user_id,omitempty"`
+	DeletedFlag bool   `json:"is_deleted,omitempty"`
 }
 
 type storedFileData struct {
@@ -41,6 +43,7 @@ type FileStore struct {
 	mu            sync.RWMutex
 	path          string
 	urls          map[string]string
+	deletedShorts map[string]struct{}
 	shortIDsByURL map[string]string
 	userShortIDs  map[string][]string
 	userShortSet  map[string]map[string]struct{}
@@ -53,6 +56,7 @@ func NewFileStore(path string) (*FileStore, error) {
 	store := &FileStore{
 		path:          path,
 		urls:          make(map[string]string),
+		deletedShorts: make(map[string]struct{}),
 		shortIDsByURL: make(map[string]string),
 		userShortIDs:  make(map[string][]string),
 		userShortSet:  make(map[string]map[string]struct{}),
@@ -181,6 +185,9 @@ func (s *FileStore) Load(_ context.Context, id string) (string, error) {
 	if !ok {
 		return "", ErrNotFound
 	}
+	if s.isDeleted(id) {
+		return "", ErrDeleted
+	}
 
 	return url, nil
 }
@@ -206,6 +213,47 @@ func (s *FileStore) FindByUserID(_ context.Context, userID string) ([]model.User
 	}
 
 	return result, nil
+}
+
+// MarkDeleted помечает принадлежащие пользователю короткие URL как удалённые.
+func (s *FileStore) MarkDeleted(_ context.Context, userID string, shortIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ownedShortIDs := s.userShortSet[userID]
+	if len(ownedShortIDs) == 0 {
+		return nil
+	}
+
+	changed := make([]string, 0, len(shortIDs))
+	for _, shortID := range shortIDs {
+		if _, exists := ownedShortIDs[shortID]; !exists {
+			continue
+		}
+		if _, exists := s.urls[shortID]; !exists {
+			continue
+		}
+		if s.isDeleted(shortID) {
+			continue
+		}
+
+		s.setDeleted(shortID, true)
+		changed = append(changed, shortID)
+	}
+
+	if len(changed) == 0 {
+		return nil
+	}
+
+	if err := s.persist(); err != nil {
+		for _, shortID := range changed {
+			s.setDeleted(shortID, false)
+		}
+
+		return err
+	}
+
+	return nil
 }
 
 func (s *FileStore) load() error {
@@ -430,6 +478,31 @@ func (s *FileStore) loadURLRecord(record storedURLRecord) error {
 	if _, exists := s.shortIDsByURL[record.OriginalURL]; !exists {
 		s.shortIDsByURL[record.OriginalURL] = record.ShortURL
 	}
+	if record.DeletedFlag {
+		s.deletedShorts[record.ShortURL] = struct{}{}
+	}
 
 	return nil
+}
+
+func (s *FileStore) isDeleted(shortID string) bool {
+	_, exists := s.deletedShorts[shortID]
+	return exists
+}
+
+func (s *FileStore) setDeleted(shortID string, deleted bool) {
+	if deleted {
+		s.deletedShorts[shortID] = struct{}{}
+	} else {
+		delete(s.deletedShorts, shortID)
+	}
+
+	for i := range s.records {
+		if s.records[i].ShortURL != shortID {
+			continue
+		}
+
+		s.records[i].DeletedFlag = deleted
+		return
+	}
 }

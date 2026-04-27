@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -115,6 +116,99 @@ func TestUserHandlerGetUserURLs(t *testing.T) {
 				return
 			}
 
+			assert.Equal(t, test.wantBody, string(body))
+		})
+	}
+}
+
+func TestUserHandlerDeleteUserURLs(t *testing.T) {
+	tests := []struct {
+		name       string
+		cookieUser string
+		body       string
+		mock       func() *mockURLShortener
+		wantCode   int
+		wantBody   string
+	}{
+		{
+			name:       "успешно принимает удаление",
+			cookieUser: "user-1",
+			body:       `["abc123","def456","abc123"]`,
+			mock: func() *mockURLShortener {
+				return &mockURLShortener{
+					DeleteUserURLsMockFunc: func(ctx context.Context, userID string, shortIDs []string) error {
+						assert.Equal(t, "user-1", userID)
+						assert.Equal(t, []string{"abc123", "def456"}, shortIDs)
+						return nil
+					},
+				}
+			},
+			wantCode: http.StatusAccepted,
+			wantBody: "",
+		},
+		{
+			name:       "cookie без user id",
+			cookieUser: "__empty__",
+			body:       `["abc123"]`,
+			mock: func() *mockURLShortener {
+				return &mockURLShortener{}
+			},
+			wantCode: http.StatusUnauthorized,
+			wantBody: "unauthorized\n",
+		},
+		{
+			name:       "битое тело",
+			cookieUser: "user-1",
+			body:       `{`,
+			mock: func() *mockURLShortener {
+				return &mockURLShortener{}
+			},
+			wantCode: http.StatusBadRequest,
+			wantBody: "bad request\n",
+		},
+		{
+			name:       "ошибка сервиса",
+			cookieUser: "user-1",
+			body:       `["abc123"]`,
+			mock: func() *mockURLShortener {
+				return &mockURLShortener{
+					DeleteUserURLsMockFunc: func(ctx context.Context, userID string, shortIDs []string) error {
+						return errors.New("service error")
+					},
+				}
+			},
+			wantCode: http.StatusInternalServerError,
+			wantBody: "internal server error\n",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			authenticator := newTestAuthenticator(t)
+			h := handler.NewUserHandler(test.mock(), "http://localhost:8080", authenticator)
+
+			req := httptest.NewRequest(http.MethodDelete, "/api/user/urls", strings.NewReader(test.body))
+			req.Header.Set("Content-Type", "application/json")
+			if test.cookieUser == "__empty__" {
+				cookie, err := authenticator.NewCookie("")
+				require.NoError(t, err)
+				req.AddCookie(cookie)
+			} else if test.cookieUser != "" {
+				cookie, err := authenticator.NewCookie(test.cookieUser)
+				require.NoError(t, err)
+				req.AddCookie(cookie)
+			}
+
+			rec := httptest.NewRecorder()
+			h.DeleteUserURLs(rec, req)
+
+			res := rec.Result()
+			defer res.Body.Close()
+
+			body, err := io.ReadAll(res.Body)
+			require.NoError(t, err)
+
+			assert.Equal(t, test.wantCode, res.StatusCode)
 			assert.Equal(t, test.wantBody, string(body))
 		})
 	}

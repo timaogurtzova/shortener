@@ -17,14 +17,25 @@ const maxGenerateAttempts = 10
 // ErrURLAlreadyExists возвращается, когда исходный URL уже был сокращён ранее.
 var ErrURLAlreadyExists = errors.New("url already exists")
 
+// ErrURLDeleted возвращается, когда короткий URL помечен как удалённый.
+var ErrURLDeleted = errors.New("url deleted")
+
 // ShortenerService хранит mapping id → URL
 type ShortenerService struct {
-	repo repository.URLRepository
+	repo        repository.URLRepository
+	deleteQueue chan deleteRequest
 }
 
 // NewShortenerService создаёт сервис
 func NewShortenerService(repo repository.URLRepository) *ShortenerService {
-	return &ShortenerService{repo: repo}
+	svc := &ShortenerService{
+		repo:        repo,
+		deleteQueue: make(chan deleteRequest, deleteQueueSize),
+	}
+
+	go svc.runDeleteWorker()
+
+	return svc
 }
 
 // Create сохраняет URL и возвращает сгенерированный ID
@@ -79,7 +90,16 @@ func (s *ShortenerService) CreateBatch(ctx context.Context, urls []string, userI
 
 // Resolve возвращает оригинальный URL по ID
 func (s *ShortenerService) Resolve(ctx context.Context, id string) (string, error) {
-	return s.repo.Load(ctx, id)
+	originalURL, err := s.repo.Load(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrDeleted) {
+			return "", ErrURLDeleted
+		}
+
+		return "", err
+	}
+
+	return originalURL, nil
 }
 
 // FindByUserID возвращает все URL, сокращённые пользователем.
