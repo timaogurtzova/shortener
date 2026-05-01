@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/rs/zerolog/log"
+	"github.com/timaogurtzova/shortener/internal/auth"
 	"github.com/timaogurtzova/shortener/internal/config"
 	httpserver "github.com/timaogurtzova/shortener/internal/http"
 	"github.com/timaogurtzova/shortener/internal/http/handler"
@@ -47,14 +48,30 @@ func run() error {
 	}
 
 	// Собираем сервисный и HTTP-слои приложения.
-	svc := service.NewShortenerService(repo)
-	createHandler := handler.NewCreateHandler(svc, cfg.Server.BaseURL)
+	serviceCtx, cancelService := context.WithCancel(context.Background())
+	defer cancelService()
+
+	svc := service.NewShortenerService(serviceCtx, repo)
+	authSecret, err := auth.NewRandomSecret(32)
+	if err != nil {
+		return fmt.Errorf("generate auth secret: %w", err)
+	}
+
+	authenticator, err := auth.NewAuthenticator(authSecret)
+	if err != nil {
+		return fmt.Errorf("initialize authenticator: %w", err)
+	}
+
+	createHandler := handler.NewCreateHandler(svc, cfg.Server.BaseURL, authenticator)
+	userHandler := handler.NewUserHandler(svc, cfg.Server.BaseURL, authenticator)
 	redirectHandler := handler.NewRedirectHandler(svc)
 	pingHandler := handler.NewPingHandler(database)
 	router := httpserver.NewRouter(httpserver.RouterHandlers{
 		CreateShortURLPlainText: createHandler.CreateShortURLPlainText,
 		CreateShortURLJSON:      createHandler.CreateShortURLJSON,
 		CreateShortURLBatchJSON: createHandler.CreateShortURLBatchJSON,
+		GetUserURLs:             userHandler.GetUserURLs,
+		DeleteUserURLs:          userHandler.DeleteUserURLs,
 		Redirect:                redirectHandler.Redirect,
 		Ping:                    pingHandler.Ping,
 	})

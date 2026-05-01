@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/rs/zerolog/log"
 	"github.com/timaogurtzova/shortener/internal/service"
 )
 
@@ -20,10 +21,11 @@ const (
 type CreateHandler struct {
 	service service.URLShortener
 	baseURL string
+	auth    userAuthenticator
 }
 
-func NewCreateHandler(service service.URLShortener, baseURL string) *CreateHandler {
-	return &CreateHandler{service: service, baseURL: baseURL}
+func NewCreateHandler(service service.URLShortener, baseURL string, authenticator userAuthenticator) *CreateHandler {
+	return &CreateHandler{service: service, baseURL: baseURL, auth: authenticator}
 }
 
 func (h *CreateHandler) CreateShortURLPlainText(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +51,7 @@ func (h *CreateHandler) CreateShortURLPlainText(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	shortURL, err := h.createShortURL(r, originalURL)
+	shortURL, err := h.createShortURL(w, r, originalURL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
@@ -58,7 +60,7 @@ func (h *CreateHandler) CreateShortURLPlainText(w http.ResponseWriter, r *http.R
 	// Формирование ответа
 	w.Header().Set("Content-Type", contentTypeText)
 	w.WriteHeader(shortURL.statusCode)
-	w.Write([]byte(shortURL.value))
+	writeResponse(w, []byte(shortURL.value))
 }
 
 func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +84,7 @@ func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	shortURL, err := h.createShortURL(r, originalURL)
+	shortURL, err := h.createShortURL(w, r, originalURL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
@@ -96,7 +98,7 @@ func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", contentTypeJSON)
 	w.WriteHeader(shortURL.statusCode)
-	w.Write(responseBody)
+	writeResponse(w, responseBody)
 }
 
 func (h *CreateHandler) CreateShortURLBatchJSON(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +136,13 @@ func (h *CreateHandler) CreateShortURLBatchJSON(w http.ResponseWriter, r *http.R
 		response[i].CorrelationID = correlationID
 	}
 
-	shortIDs, err := h.service.CreateBatch(r.Context(), originalURLs)
+	userID, err := h.auth.EnsureUserID(w, r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	shortIDs, err := h.service.CreateBatch(r.Context(), originalURLs, userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
@@ -156,7 +164,7 @@ func (h *CreateHandler) CreateShortURLBatchJSON(w http.ResponseWriter, r *http.R
 
 	w.Header().Set("Content-Type", contentTypeJSON)
 	w.WriteHeader(http.StatusCreated)
-	w.Write(responseBody)
+	writeResponse(w, responseBody)
 }
 
 type createShortURLResult struct {
@@ -164,8 +172,13 @@ type createShortURLResult struct {
 	statusCode int
 }
 
-func (h *CreateHandler) createShortURL(r *http.Request, originalURL string) (createShortURLResult, error) {
-	shortID, err := h.service.Create(r.Context(), originalURL)
+func (h *CreateHandler) createShortURL(w http.ResponseWriter, r *http.Request, originalURL string) (createShortURLResult, error) {
+	userID, err := h.auth.EnsureUserID(w, r)
+	if err != nil {
+		return createShortURLResult{}, err
+	}
+
+	shortID, err := h.service.Create(r.Context(), originalURL, userID)
 	if err != nil {
 		if errors.Is(err, service.ErrURLAlreadyExists) && shortID != "" {
 			return createShortURLResult{
@@ -185,4 +198,10 @@ func (h *CreateHandler) createShortURL(r *http.Request, originalURL string) (cre
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	http.Error(w, msg, status)
+}
+
+func writeResponse(w http.ResponseWriter, body []byte) {
+	if _, err := w.Write(body); err != nil {
+		log.Error().Err(err).Msg("failed to write http response")
+	}
 }

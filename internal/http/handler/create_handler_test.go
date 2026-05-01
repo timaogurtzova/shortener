@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/timaogurtzova/shortener/internal/auth"
 	"github.com/timaogurtzova/shortener/internal/http/handler"
 	"github.com/timaogurtzova/shortener/internal/service"
 )
@@ -38,7 +39,8 @@ func TestCreateShortURLPlainTextHandler(t *testing.T) {
 			contentType: "text/plain",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					CreateMockFunc: func(ctx context.Context, url string) (string, error) {
+					CreateMockFunc: func(ctx context.Context, url, userID string) (string, error) {
+						assert.NotEmpty(t, userID)
 						return "abc123", nil
 					},
 				}
@@ -80,7 +82,7 @@ func TestCreateShortURLPlainTextHandler(t *testing.T) {
 			contentType: "text/plain",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					CreateMockFunc: func(ctx context.Context, url string) (string, error) {
+					CreateMockFunc: func(ctx context.Context, url, userID string) (string, error) {
 						return "", errors.New("service error")
 					},
 				}
@@ -98,7 +100,7 @@ func TestCreateShortURLPlainTextHandler(t *testing.T) {
 			contentType: "text/plain",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					CreateMockFunc: func(ctx context.Context, url string) (string, error) {
+					CreateMockFunc: func(ctx context.Context, url, userID string) (string, error) {
 						return "abc123", service.ErrURLAlreadyExists
 					},
 				}
@@ -119,11 +121,11 @@ func TestCreateShortURLPlainTextHandler(t *testing.T) {
 			} else {
 				// минимальный мок
 				svc = &mockURLShortener{
-					CreateMockFunc: func(ctx context.Context, url string) (string, error) { return "", nil },
+					CreateMockFunc: func(ctx context.Context, url, userID string) (string, error) { return "", nil },
 				}
 			}
 
-			h := handler.NewCreateHandler(svc, "http://localhost:8080")
+			h := handler.NewCreateHandler(svc, "http://localhost:8080", newTestAuthenticator(t))
 
 			req := httptest.NewRequest(test.method, "/", strings.NewReader(test.body))
 			req.Header.Set("Content-Type", test.contentType)
@@ -145,6 +147,10 @@ func TestCreateShortURLPlainTextHandler(t *testing.T) {
 
 			// Проверяем Content-Type
 			assert.Equal(t, test.want.contentType, res.Header.Get("Content-Type"))
+
+			if test.want.code < 500 && test.want.code != http.StatusBadRequest {
+				assert.NotEmpty(t, res.Cookies())
+			}
 		})
 	}
 }
@@ -171,7 +177,8 @@ func TestCreateShortURLJSONHandler(t *testing.T) {
 			contentType: "application/json",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					CreateMockFunc: func(ctx context.Context, url string) (string, error) {
+					CreateMockFunc: func(ctx context.Context, url, userID string) (string, error) {
+						assert.NotEmpty(t, userID)
 						return "abc123", nil
 					},
 				}
@@ -222,7 +229,7 @@ func TestCreateShortURLJSONHandler(t *testing.T) {
 			contentType: "application/json",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					CreateMockFunc: func(ctx context.Context, url string) (string, error) {
+					CreateMockFunc: func(ctx context.Context, url, userID string) (string, error) {
 						return "", errors.New("service error")
 					},
 				}
@@ -240,7 +247,7 @@ func TestCreateShortURLJSONHandler(t *testing.T) {
 			contentType: "application/json",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					CreateMockFunc: func(ctx context.Context, url string) (string, error) {
+					CreateMockFunc: func(ctx context.Context, url, userID string) (string, error) {
 						return "abc123", service.ErrURLAlreadyExists
 					},
 				}
@@ -260,11 +267,11 @@ func TestCreateShortURLJSONHandler(t *testing.T) {
 				svc = test.mock()
 			} else {
 				svc = &mockURLShortener{
-					CreateMockFunc: func(ctx context.Context, url string) (string, error) { return "", nil },
+					CreateMockFunc: func(ctx context.Context, url, userID string) (string, error) { return "", nil },
 				}
 			}
 
-			h := handler.NewCreateHandler(svc, "http://localhost:8080")
+			h := handler.NewCreateHandler(svc, "http://localhost:8080", newTestAuthenticator(t))
 
 			req := httptest.NewRequest(test.method, "/api/shorten", strings.NewReader(test.body))
 			req.Header.Set("Content-Type", test.contentType)
@@ -292,6 +299,10 @@ func TestCreateShortURLJSONHandler(t *testing.T) {
 			}
 
 			assert.Equal(t, test.want.contentType, res.Header.Get("Content-Type"))
+
+			if test.want.code < 500 && test.want.code != http.StatusBadRequest {
+				assert.NotEmpty(t, res.Cookies())
+			}
 		})
 	}
 }
@@ -316,7 +327,8 @@ func TestCreateShortURLBatchJSONHandler(t *testing.T) {
 			contentType: "application/json",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					CreateBatchMockFunc: func(ctx context.Context, urls []string) ([]string, error) {
+					CreateBatchMockFunc: func(ctx context.Context, urls []string, userID string) ([]string, error) {
+						assert.NotEmpty(t, userID)
 						return []string{"abc123", "def456"}, nil
 					},
 				}
@@ -363,7 +375,7 @@ func TestCreateShortURLBatchJSONHandler(t *testing.T) {
 			contentType: "application/json",
 			mock: func() *mockURLShortener {
 				return &mockURLShortener{
-					CreateBatchMockFunc: func(ctx context.Context, urls []string) ([]string, error) {
+					CreateBatchMockFunc: func(ctx context.Context, urls []string, userID string) ([]string, error) {
 						return nil, errors.New("service error")
 					},
 				}
@@ -383,11 +395,11 @@ func TestCreateShortURLBatchJSONHandler(t *testing.T) {
 				svc = test.mock()
 			} else {
 				svc = &mockURLShortener{
-					CreateBatchMockFunc: func(ctx context.Context, urls []string) ([]string, error) { return nil, nil },
+					CreateBatchMockFunc: func(ctx context.Context, urls []string, userID string) ([]string, error) { return nil, nil },
 				}
 			}
 
-			h := handler.NewCreateHandler(svc, "http://localhost:8080")
+			h := handler.NewCreateHandler(svc, "http://localhost:8080", newTestAuthenticator(t))
 
 			req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", strings.NewReader(test.body))
 			req.Header.Set("Content-Type", test.contentType)
@@ -415,6 +427,19 @@ func TestCreateShortURLBatchJSONHandler(t *testing.T) {
 			}
 
 			assert.Equal(t, test.want.contentType, res.Header.Get("Content-Type"))
+
+			if test.want.code < 500 && test.want.code != http.StatusBadRequest {
+				assert.NotEmpty(t, res.Cookies())
+			}
 		})
 	}
+}
+
+func newTestAuthenticator(t *testing.T) *auth.Authenticator {
+	t.Helper()
+
+	authenticator, err := auth.NewAuthenticator([]byte("01234567890123456789012345678901"))
+	require.NoError(t, err)
+
+	return authenticator
 }

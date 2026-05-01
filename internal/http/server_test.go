@@ -25,6 +25,8 @@ func TestServerRouting(t *testing.T) {
 		wantCreateShortURLPlainText bool
 		wantCreateShortURLJSON      bool
 		wantCreateShortURLBatchJSON bool
+		wantGetUserURLs             bool
+		wantDeleteUserURLs          bool
 		wantRedirect                bool
 		wantPing                    bool
 	}{
@@ -37,6 +39,8 @@ func TestServerRouting(t *testing.T) {
 			wantCreateShortURLPlainText: true,
 			wantCreateShortURLJSON:      false,
 			wantCreateShortURLBatchJSON: false,
+			wantGetUserURLs:             false,
+			wantDeleteUserURLs:          false,
 			wantRedirect:                false,
 			wantPing:                    false,
 		},
@@ -49,6 +53,8 @@ func TestServerRouting(t *testing.T) {
 			wantCreateShortURLPlainText: false,
 			wantCreateShortURLJSON:      false,
 			wantCreateShortURLBatchJSON: false,
+			wantGetUserURLs:             false,
+			wantDeleteUserURLs:          false,
 			wantRedirect:                false,
 			wantPing:                    false,
 		},
@@ -61,6 +67,8 @@ func TestServerRouting(t *testing.T) {
 			wantCreateShortURLPlainText: false,
 			wantCreateShortURLJSON:      true,
 			wantCreateShortURLBatchJSON: false,
+			wantGetUserURLs:             false,
+			wantDeleteUserURLs:          false,
 			wantRedirect:                false,
 			wantPing:                    false,
 		},
@@ -73,6 +81,36 @@ func TestServerRouting(t *testing.T) {
 			wantCreateShortURLPlainText: false,
 			wantCreateShortURLJSON:      false,
 			wantCreateShortURLBatchJSON: true,
+			wantGetUserURLs:             false,
+			wantDeleteUserURLs:          false,
+			wantRedirect:                false,
+			wantPing:                    false,
+		},
+		{
+			name:                        "GET /api/user/urls -> getUserURLs handler ok",
+			method:                      http.MethodGet,
+			path:                        "/api/user/urls",
+			wantBody:                    "user-urls",
+			wantCode:                    http.StatusOK,
+			wantCreateShortURLPlainText: false,
+			wantCreateShortURLJSON:      false,
+			wantCreateShortURLBatchJSON: false,
+			wantGetUserURLs:             true,
+			wantDeleteUserURLs:          false,
+			wantRedirect:                false,
+			wantPing:                    false,
+		},
+		{
+			name:                        "DELETE /api/user/urls -> deleteUserURLs handler ok",
+			method:                      http.MethodDelete,
+			path:                        "/api/user/urls",
+			wantBody:                    "delete-user-urls",
+			wantCode:                    http.StatusAccepted,
+			wantCreateShortURLPlainText: false,
+			wantCreateShortURLJSON:      false,
+			wantCreateShortURLBatchJSON: false,
+			wantGetUserURLs:             false,
+			wantDeleteUserURLs:          true,
 			wantRedirect:                false,
 			wantPing:                    false,
 		},
@@ -85,6 +123,8 @@ func TestServerRouting(t *testing.T) {
 			wantCreateShortURLPlainText: false,
 			wantCreateShortURLJSON:      false,
 			wantCreateShortURLBatchJSON: false,
+			wantGetUserURLs:             false,
+			wantDeleteUserURLs:          false,
 			wantRedirect:                false,
 			wantPing:                    true,
 		},
@@ -97,6 +137,8 @@ func TestServerRouting(t *testing.T) {
 			wantCreateShortURLPlainText: false,
 			wantCreateShortURLJSON:      false,
 			wantCreateShortURLBatchJSON: false,
+			wantGetUserURLs:             false,
+			wantDeleteUserURLs:          false,
 			wantRedirect:                true,
 			wantPing:                    false,
 		},
@@ -109,6 +151,8 @@ func TestServerRouting(t *testing.T) {
 			wantCreateShortURLPlainText: false,
 			wantCreateShortURLJSON:      false,
 			wantCreateShortURLBatchJSON: false,
+			wantGetUserURLs:             false,
+			wantDeleteUserURLs:          false,
 			wantRedirect:                false,
 			wantPing:                    false,
 		},
@@ -120,6 +164,8 @@ func TestServerRouting(t *testing.T) {
 			createShortURLPlainTextCalled := false
 			createShortURLJSONCalled := false
 			createShortURLBatchJSONCalled := false
+			getUserURLsCalled := false
+			deleteUserURLsCalled := false
 			redirectCalled := false
 			pingCalled := false
 
@@ -153,6 +199,26 @@ func TestServerRouting(t *testing.T) {
 				w.Write([]byte("create-batch-json"))
 			})
 
+			getUserURLsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				getUserURLsCalled = true
+				if r.Method != http.MethodGet {
+					http.Error(w, "bad request", http.StatusBadRequest)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("user-urls"))
+			})
+
+			deleteUserURLsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				deleteUserURLsCalled = true
+				if r.Method != http.MethodDelete {
+					http.Error(w, "bad request", http.StatusBadRequest)
+					return
+				}
+				w.WriteHeader(http.StatusAccepted)
+				w.Write([]byte("delete-user-urls"))
+			})
+
 			// Мок RedirectHandler
 			redirectHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				redirectCalled = true
@@ -178,6 +244,8 @@ func TestServerRouting(t *testing.T) {
 				createShortURLPlainTextHandler,
 				createShortURLJSONHandler,
 				createShortURLBatchJSONHandler,
+				getUserURLsHandler,
+				deleteUserURLsHandler,
 				redirectHandler,
 				pingHandler,
 			)
@@ -212,6 +280,8 @@ func TestServerRouting(t *testing.T) {
 			assert.Equal(t, tt.wantCreateShortURLPlainText, createShortURLPlainTextCalled)
 			assert.Equal(t, tt.wantCreateShortURLJSON, createShortURLJSONCalled)
 			assert.Equal(t, tt.wantCreateShortURLBatchJSON, createShortURLBatchJSONCalled)
+			assert.Equal(t, tt.wantGetUserURLs, getUserURLsCalled)
+			assert.Equal(t, tt.wantDeleteUserURLs, deleteUserURLsCalled)
 			assert.Equal(t, tt.wantRedirect, redirectCalled)
 			assert.Equal(t, tt.wantPing, pingCalled)
 		})
@@ -240,6 +310,8 @@ func TestLoggingMiddlewareLogsRequestAndResponseData(t *testing.T) {
 		createShortURLPlainTextHandler,
 		createShortURLPlainTextHandler,
 		createShortURLPlainTextHandler,
+		okPingHandler(),
+		okPingHandler(),
 		redirectHandler,
 		okPingHandler(),
 	)
@@ -279,6 +351,8 @@ func TestLoggingMiddlewareLogsImplicitStatusCode(t *testing.T) {
 		createShortURLPlainTextHandler,
 		createShortURLPlainTextHandler,
 		createShortURLPlainTextHandler,
+		okPingHandler(),
+		okPingHandler(),
 		redirectHandler,
 		okPingHandler(),
 	)
@@ -319,6 +393,8 @@ func TestGzipRequestMiddlewareDecompressesRequestBody(t *testing.T) {
 		createShortURLPlainTextHandler,
 		createShortURLJSONHandler,
 		createShortURLJSONHandler,
+		okPingHandler(),
+		okPingHandler(),
 		redirectHandler,
 		okPingHandler(),
 	)
@@ -355,6 +431,8 @@ func TestGzipRequestMiddlewareReturnsBadRequestForUnsupportedEncoding(t *testing
 		createShortURLPlainTextHandler,
 		createShortURLJSONHandler,
 		createShortURLJSONHandler,
+		okPingHandler(),
+		okPingHandler(),
 		redirectHandler,
 		okPingHandler(),
 	)
@@ -391,6 +469,8 @@ func TestGzipRequestMiddlewareReturnsBadRequestForBrokenGzip(t *testing.T) {
 		createShortURLPlainTextHandler,
 		createShortURLJSONHandler,
 		createShortURLJSONHandler,
+		okPingHandler(),
+		okPingHandler(),
 		redirectHandler,
 		okPingHandler(),
 	)
@@ -427,6 +507,8 @@ func TestGzipRequestMiddlewareReturnsBadRequestForMultipleEncodings(t *testing.T
 		createShortURLPlainTextHandler,
 		createShortURLJSONHandler,
 		createShortURLJSONHandler,
+		okPingHandler(),
+		okPingHandler(),
 		redirectHandler,
 		okPingHandler(),
 	)
@@ -463,6 +545,8 @@ func TestGzipResponseMiddlewareCompressesJSONResponse(t *testing.T) {
 		createShortURLPlainTextHandler,
 		createShortURLJSONHandler,
 		createShortURLJSONHandler,
+		okPingHandler(),
+		okPingHandler(),
 		redirectHandler,
 		okPingHandler(),
 	)
@@ -503,6 +587,8 @@ func TestGzipResponseMiddlewareSkipsUnsupportedContentType(t *testing.T) {
 		createShortURLPlainTextHandler,
 		createShortURLJSONHandler,
 		createShortURLJSONHandler,
+		okPingHandler(),
+		okPingHandler(),
 		redirectHandler,
 		okPingHandler(),
 	)
@@ -559,6 +645,8 @@ func newTestRouter(
 	createShortURLPlainTextHandler http.HandlerFunc,
 	createShortURLJSONHandler http.HandlerFunc,
 	createShortURLBatchJSONHandler http.HandlerFunc,
+	getUserURLsHandler http.HandlerFunc,
+	deleteUserURLsHandler http.HandlerFunc,
 	redirectHandler http.HandlerFunc,
 	pingHandler http.HandlerFunc,
 ) http.Handler {
@@ -566,6 +654,8 @@ func newTestRouter(
 		CreateShortURLPlainText: createShortURLPlainTextHandler,
 		CreateShortURLJSON:      createShortURLJSONHandler,
 		CreateShortURLBatchJSON: createShortURLBatchJSONHandler,
+		GetUserURLs:             getUserURLsHandler,
+		DeleteUserURLs:          deleteUserURLsHandler,
 		Redirect:                redirectHandler,
 		Ping:                    pingHandler,
 	})

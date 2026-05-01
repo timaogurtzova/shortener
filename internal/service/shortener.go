@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/timaogurtzova/shortener/internal/model"
 	"github.com/timaogurtzova/shortener/internal/repository"
 )
 
@@ -16,25 +17,42 @@ const maxGenerateAttempts = 10
 // ErrURLAlreadyExists возвращается, когда исходный URL уже был сокращён ранее.
 var ErrURLAlreadyExists = errors.New("url already exists")
 
+// ErrURLDeleted возвращается, когда короткий URL помечен как удалённый.
+var ErrURLDeleted = errors.New("url deleted")
+
 // ShortenerService хранит mapping id → URL
 type ShortenerService struct {
-	repo repository.URLRepository
+	repo        repository.URLRepository
+	deleteQueue chan deleteRequest
+	workerDone  chan struct{}
 }
 
 // NewShortenerService создаёт сервис
-func NewShortenerService(repo repository.URLRepository) *ShortenerService {
-	return &ShortenerService{repo: repo}
+func NewShortenerService(ctx context.Context, repo repository.URLRepository) *ShortenerService {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	svc := &ShortenerService{
+		repo:        repo,
+		deleteQueue: make(chan deleteRequest, deleteQueueSize),
+		workerDone:  make(chan struct{}),
+	}
+
+	go svc.runDeleteWorker(ctx)
+
+	return svc
 }
 
 // Create сохраняет URL и возвращает сгенерированный ID
-func (s *ShortenerService) Create(ctx context.Context, url string) (string, error) {
+func (s *ShortenerService) Create(ctx context.Context, url, userID string) (string, error) {
 	for i := 0; i < maxGenerateAttempts; i++ {
 		id, err := GenerateID(8)
 		if err != nil {
 			return "", err
 		}
 
-		err = s.repo.Store(ctx, id, url)
+		err = s.repo.Store(ctx, id, url, userID)
 		if err == nil {
 			return id, nil
 		}
@@ -52,13 +70,13 @@ func (s *ShortenerService) Create(ctx context.Context, url string) (string, erro
 }
 
 // CreateBatch сохраняет пакет URL и возвращает сгенерированные ID в исходном порядке.
-func (s *ShortenerService) CreateBatch(ctx context.Context, urls []string) ([]string, error) {
+func (s *ShortenerService) CreateBatch(ctx context.Context, urls []string, userID string) ([]string, error) {
 	if len(urls) == 0 {
 		return nil, errors.New("empty batch")
 	}
 
 	for i := 0; i < maxGenerateAttempts; i++ {
-		records, ids, err := buildBatchRecords(urls)
+		records, ids, err := buildBatchRecords(urls, userID)
 		if err != nil {
 			return nil, err
 		}
@@ -78,7 +96,21 @@ func (s *ShortenerService) CreateBatch(ctx context.Context, urls []string) ([]st
 
 // Resolve возвращает оригинальный URL по ID
 func (s *ShortenerService) Resolve(ctx context.Context, id string) (string, error) {
-	return s.repo.Load(ctx, id)
+	originalURL, err := s.repo.Load(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrDeleted) {
+			return "", ErrURLDeleted
+		}
+
+		return "", err
+	}
+
+	return originalURL, nil
+}
+
+// FindByUserID возвращает все URL, сокращённые пользователем.
+func (s *ShortenerService) FindByUserID(ctx context.Context, userID string) ([]model.UserURL, error) {
+	return s.repo.FindByUserID(ctx, userID)
 }
 
 // GenerateID создаёт случайный ID длиной n
@@ -97,7 +129,7 @@ func GenerateID(n int) (string, error) {
 	return result.String(), nil
 }
 
-func buildBatchRecords(urls []string) ([]repository.BatchRecord, []string, error) {
+func buildBatchRecords(urls []string, userID string) ([]repository.BatchRecord, []string, error) {
 	records := make([]repository.BatchRecord, len(urls))
 	ids := make([]string, len(urls))
 	usedIDs := make(map[string]struct{}, len(urls))
@@ -113,6 +145,7 @@ func buildBatchRecords(urls []string) ([]repository.BatchRecord, []string, error
 		records[i] = repository.BatchRecord{
 			ID:          id,
 			OriginalURL: originalURL,
+			UserID:      userID,
 		}
 	}
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/lib/pq"
+	"github.com/timaogurtzova/shortener/internal/model"
 )
 
 const (
@@ -26,9 +27,29 @@ const (
 		LIMIT 1
 	`
 	selectOriginalURLQuery = `
-		SELECT original_url
+		SELECT original_url, is_deleted
 		FROM short_urls
 		WHERE short_url = $1
+	`
+	insertUserURLQuery = `
+		INSERT INTO user_urls (user_id, short_url)
+		VALUES ($1, $2)
+		ON CONFLICT (user_id, short_url) DO NOTHING
+	`
+	selectUserURLsQuery = `
+		SELECT short_urls.short_url, short_urls.original_url
+		FROM user_urls
+		JOIN short_urls ON short_urls.short_url = user_urls.short_url
+		WHERE user_urls.user_id = $1
+		ORDER BY user_urls.id
+	`
+	markDeletedQuery = `
+		UPDATE short_urls AS su
+		SET is_deleted = TRUE
+		FROM user_urls AS uu
+		WHERE su.short_url = uu.short_url
+		  AND uu.user_id = $1
+		  AND su.short_url = ANY($2)
 	`
 )
 
@@ -47,17 +68,31 @@ func NewDBStore(db *sql.DB) (*DBStore, error) {
 }
 
 // Store сохраняет исходный URL по короткому идентификатору.
-func (s *DBStore) Store(ctx context.Context, id, url string) error {
+func (s *DBStore) Store(ctx context.Context, id, url, userID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	var storedID string
 	var created bool
 
-	err := s.db.QueryRowContext(ctx, storeShortURLQuery, id, url).Scan(&storedID, &created)
+	err = tx.QueryRowContext(ctx, storeShortURLQuery, id, url).Scan(&storedID, &created)
 	if err == nil {
+		if err = s.storeUserURL(ctx, tx, userID, storedID); err != nil {
+			return err
+		}
+
 		if !created {
+			if err = tx.Commit(); err != nil {
+				return err
+			}
+
 			return &URLConflictError{ShortID: storedID}
 		}
 
-		return nil
+		return tx.Commit()
 	}
 
 	var pqErr *pq.Error
@@ -82,6 +117,10 @@ func (s *DBStore) BatchStore(ctx context.Context, records []BatchRecord) error {
 
 		err = tx.QueryRowContext(ctx, storeShortURLQuery, record.ID, record.OriginalURL).Scan(&storedID, &created)
 		if err == nil {
+			if err = s.storeUserURL(ctx, tx, record.UserID, storedID); err != nil {
+				return err
+			}
+
 			if !created {
 				return &URLConflictError{ShortID: storedID}
 			}
@@ -103,9 +142,14 @@ func (s *DBStore) BatchStore(ctx context.Context, records []BatchRecord) error {
 // Load возвращает исходный URL по короткому идентификатору.
 func (s *DBStore) Load(ctx context.Context, id string) (string, error) {
 	var originalURL string
+	var deleted bool
 
-	err := s.db.QueryRowContext(ctx, selectOriginalURLQuery, id).Scan(&originalURL)
+	err := s.db.QueryRowContext(ctx, selectOriginalURLQuery, id).Scan(&originalURL, &deleted)
 	if err == nil {
+		if deleted {
+			return "", ErrDeleted
+		}
+
 		return originalURL, nil
 	}
 
@@ -114,4 +158,48 @@ func (s *DBStore) Load(ctx context.Context, id string) (string, error) {
 	}
 
 	return "", err
+}
+
+// FindByUserID возвращает все URL, сокращённые пользователем.
+func (s *DBStore) FindByUserID(ctx context.Context, userID string) ([]model.UserURL, error) {
+	rows, err := s.db.QueryContext(ctx, selectUserURLsQuery, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]model.UserURL, 0)
+	for rows.Next() {
+		var item model.UserURL
+		if err := rows.Scan(&item.ShortID, &item.OriginalURL); err != nil {
+			return nil, err
+		}
+
+		result = append(result, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// MarkDeleted помечает принадлежащие пользователю короткие URL как удалённые.
+func (s *DBStore) MarkDeleted(ctx context.Context, userID string, shortIDs []string) error {
+	if userID == "" || len(shortIDs) == 0 {
+		return nil
+	}
+
+	_, err := s.db.ExecContext(ctx, markDeletedQuery, userID, pq.Array(shortIDs))
+	return err
+}
+
+func (s *DBStore) storeUserURL(ctx context.Context, tx *sql.Tx, userID, shortID string) error {
+	if userID == "" {
+		return nil
+	}
+
+	_, err := tx.ExecContext(ctx, insertUserURLQuery, userID, shortID)
+	return err
 }

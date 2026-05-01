@@ -1,12 +1,18 @@
 package service
 
-import "context"
+import (
+	"context"
+
+	"github.com/timaogurtzova/shortener/internal/model"
+)
 
 // URLShortener описывает контракт сервиса сокращения URL для HTTP-обработчиков.
 type URLShortener interface {
-	Create(ctx context.Context, url string) (string, error)
-	CreateBatch(ctx context.Context, urls []string) ([]string, error)
+	Create(ctx context.Context, url, userID string) (string, error)
+	CreateBatch(ctx context.Context, urls []string, userID string) ([]string, error)
 	Resolve(ctx context.Context, id string) (string, error)
+	FindByUserID(ctx context.Context, userID string) ([]model.UserURL, error)
+	DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error
 }
 
 // HealthChecker описывает проверку доступности внешних зависимостей сервиса.

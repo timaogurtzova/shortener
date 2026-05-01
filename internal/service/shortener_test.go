@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/timaogurtzova/shortener/internal/model"
 	"github.com/timaogurtzova/shortener/internal/repository"
 	"github.com/timaogurtzova/shortener/internal/service"
 )
@@ -13,14 +16,15 @@ import (
 func TestShortenerService_Create(t *testing.T) {
 	tests := []struct {
 		name          string
-		mockStoreFunc func(ctx context.Context, id, url string) error
+		mockStoreFunc func(ctx context.Context, id, url, userID string) error
 		wantID        string
 		wantErr       bool
 		wantConflict  bool
 	}{
 		{
 			name: "успешное создание",
-			mockStoreFunc: func(ctx context.Context, id, url string) error {
+			mockStoreFunc: func(ctx context.Context, id, url, userID string) error {
+				assert.Equal(t, "user-1", userID)
 				return nil
 			},
 			wantErr:      false,
@@ -28,7 +32,7 @@ func TestShortenerService_Create(t *testing.T) {
 		},
 		{
 			name: "ошибка при сохранении",
-			mockStoreFunc: func(ctx context.Context, id, url string) error {
+			mockStoreFunc: func(ctx context.Context, id, url, userID string) error {
 				return errors.New("store error")
 			},
 			wantErr:      true,
@@ -36,7 +40,7 @@ func TestShortenerService_Create(t *testing.T) {
 		},
 		{
 			name: "исходный url уже сокращён",
-			mockStoreFunc: func(ctx context.Context, id, url string) error {
+			mockStoreFunc: func(ctx context.Context, id, url, userID string) error {
 				return &repository.URLConflictError{ShortID: "abc123"}
 			},
 			wantID:       "abc123",
@@ -50,9 +54,9 @@ func TestShortenerService_Create(t *testing.T) {
 			mockRepo := &mockURLRepository{
 				storeFunc: tt.mockStoreFunc,
 			}
-			svc := service.NewShortenerService(mockRepo)
+			svc := service.NewShortenerService(context.Background(), mockRepo)
 
-			id, err := svc.Create(context.Background(), "https://example.com")
+			id, err := svc.Create(context.Background(), "https://example.com", "user-1")
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.wantConflict {
@@ -90,6 +94,14 @@ func TestShortenerService_Resolve(t *testing.T) {
 			wantURL: "",
 			wantErr: true,
 		},
+		{
+			name: "id удалён",
+			mockLoad: func(ctx context.Context, id string) (string, error) {
+				return "", repository.ErrDeleted
+			},
+			wantURL: "",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -97,11 +109,14 @@ func TestShortenerService_Resolve(t *testing.T) {
 			mockRepo := &mockURLRepository{
 				loadFunc: tt.mockLoad,
 			}
-			svc := service.NewShortenerService(mockRepo)
+			svc := service.NewShortenerService(context.Background(), mockRepo)
 
 			url, err := svc.Resolve(context.Background(), "abc123")
 			if tt.wantErr {
 				assert.Error(t, err)
+				if tt.name == "id удалён" {
+					assert.ErrorIs(t, err, service.ErrURLDeleted)
+				}
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.wantURL, url)
@@ -149,9 +164,9 @@ func TestShortenerService_CreateBatch(t *testing.T) {
 			mockRepo := &mockURLRepository{
 				batchStoreFunc: tt.mockBatchStoreFunc,
 			}
-			svc := service.NewShortenerService(mockRepo)
+			svc := service.NewShortenerService(context.Background(), mockRepo)
 
-			ids, err := svc.CreateBatch(context.Background(), tt.urls)
+			ids, err := svc.CreateBatch(context.Background(), tt.urls, "user-1")
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
@@ -163,5 +178,49 @@ func TestShortenerService_CreateBatch(t *testing.T) {
 				assert.NotEmpty(t, id)
 			}
 		})
+	}
+}
+
+func TestShortenerService_FindByUserID(t *testing.T) {
+	expected := []model.UserURL{
+		{ShortID: "abc123", OriginalURL: "https://example.com"},
+	}
+
+	mockRepo := &mockURLRepository{
+		findByUserFunc: func(ctx context.Context, userID string) ([]model.UserURL, error) {
+			assert.Equal(t, "user-1", userID)
+			return expected, nil
+		},
+	}
+
+	svc := service.NewShortenerService(context.Background(), mockRepo)
+
+	actual, err := svc.FindByUserID(context.Background(), "user-1")
+	assert.NoError(t, err)
+	assert.Equal(t, expected, actual)
+}
+
+func TestShortenerService_DeleteUserURLs(t *testing.T) {
+	called := make(chan []string, 1)
+
+	mockRepo := &mockURLRepository{
+		markDeletedFunc: func(ctx context.Context, userID string, shortIDs []string) error {
+			assert.Equal(t, "user-1", userID)
+			called <- shortIDs
+			return nil
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc := service.NewShortenerService(ctx, mockRepo)
+	require.NoError(t, svc.DeleteUserURLs(context.Background(), "user-1", []string{"abc123", "def456", "abc123"}))
+
+	select {
+	case shortIDs := <-called:
+		assert.ElementsMatch(t, []string{"abc123", "def456"}, shortIDs)
+	case <-time.After(time.Second):
+		t.Fatal("delete request was not processed asynchronously")
 	}
 }
