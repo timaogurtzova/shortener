@@ -14,10 +14,10 @@ import (
 type UserHandler struct {
 	service service.URLShortener
 	baseURL string
-	auth    *auth.Authenticator
+	auth    userAuthenticator
 }
 
-func NewUserHandler(service service.URLShortener, baseURL string, authenticator *auth.Authenticator) *UserHandler {
+func NewUserHandler(service service.URLShortener, baseURL string, authenticator userAuthenticator) *UserHandler {
 	return &UserHandler{service: service, baseURL: baseURL, auth: authenticator}
 }
 
@@ -60,7 +60,7 @@ func (h *UserHandler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", contentTypeJSON)
 	w.WriteHeader(http.StatusOK)
-	w.Write(responseBody)
+	writeResponse(w, responseBody)
 }
 
 func (h *UserHandler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {

@@ -40,3 +40,35 @@ func TestNewCookieForRequestMarksHTTPSCookieAsSecure(t *testing.T) {
 
 	assert.True(t, cookie.Secure)
 }
+
+func TestUserIDForHistoryCreatesCookieWhenMissing(t *testing.T) {
+	authenticator, err := auth.NewAuthenticator([]byte("01234567890123456789012345678901"))
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/user/urls", nil)
+	rec := httptest.NewRecorder()
+
+	userID, err := authenticator.UserIDForHistory(rec, req)
+	require.NoError(t, err)
+	assert.NotEmpty(t, userID)
+	res := rec.Result()
+	defer res.Body.Close()
+	assert.NotEmpty(t, res.Cookies())
+}
+
+func TestUserIDForHistoryReturnsErrorForInvalidCookie(t *testing.T) {
+	authenticator, err := auth.NewAuthenticator([]byte("01234567890123456789012345678901"))
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/user/urls", nil)
+	req.AddCookie(&http.Cookie{Name: "user_id", Value: "broken"})
+	rec := httptest.NewRecorder()
+
+	userID, err := authenticator.UserIDForHistory(rec, req)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, auth.ErrUserIDMissing)
+	assert.Empty(t, userID)
+	res := rec.Result()
+	defer res.Body.Close()
+	assert.Empty(t, res.Cookies())
+}

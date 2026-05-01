@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -94,10 +95,12 @@ func (a *Authenticator) UserIDForHistory(w http.ResponseWriter, r *http.Request)
 	switch state {
 	case cookieStateValid:
 		return userID, nil
+	case cookieStateMissing:
+		return a.EnsureUserID(w, r)
 	case cookieStateEmptyUserID:
 		return "", ErrUserIDMissing
 	default:
-		return a.EnsureUserID(w, r)
+		return "", ErrUserIDMissing
 	}
 }
 
@@ -210,16 +213,19 @@ func (a *Authenticator) sign(payload string) ([]byte, error) {
 func generateUserID(length int) (string, error) {
 	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-	bytes := make([]byte, length)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
+	var result strings.Builder
+	result.Grow(length)
+
+	for i := 0; i < length; i++ {
+		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
+		if err != nil {
+			return "", err
+		}
+
+		result.WriteByte(alphabet[num.Int64()])
 	}
 
-	for i := range bytes {
-		bytes[i] = alphabet[int(bytes[i])%len(alphabet)]
-	}
-
-	return string(bytes), nil
+	return result.String(), nil
 }
 
 func isSecureRequest(r *http.Request) bool {

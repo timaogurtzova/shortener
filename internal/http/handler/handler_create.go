@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/timaogurtzova/shortener/internal/auth"
+	"github.com/rs/zerolog/log"
 	"github.com/timaogurtzova/shortener/internal/service"
 )
 
@@ -21,10 +21,10 @@ const (
 type CreateHandler struct {
 	service service.URLShortener
 	baseURL string
-	auth    *auth.Authenticator
+	auth    userAuthenticator
 }
 
-func NewCreateHandler(service service.URLShortener, baseURL string, authenticator *auth.Authenticator) *CreateHandler {
+func NewCreateHandler(service service.URLShortener, baseURL string, authenticator userAuthenticator) *CreateHandler {
 	return &CreateHandler{service: service, baseURL: baseURL, auth: authenticator}
 }
 
@@ -60,7 +60,7 @@ func (h *CreateHandler) CreateShortURLPlainText(w http.ResponseWriter, r *http.R
 	// Формирование ответа
 	w.Header().Set("Content-Type", contentTypeText)
 	w.WriteHeader(shortURL.statusCode)
-	w.Write([]byte(shortURL.value))
+	writeResponse(w, []byte(shortURL.value))
 }
 
 func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +98,7 @@ func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", contentTypeJSON)
 	w.WriteHeader(shortURL.statusCode)
-	w.Write(responseBody)
+	writeResponse(w, responseBody)
 }
 
 func (h *CreateHandler) CreateShortURLBatchJSON(w http.ResponseWriter, r *http.Request) {
@@ -164,7 +164,7 @@ func (h *CreateHandler) CreateShortURLBatchJSON(w http.ResponseWriter, r *http.R
 
 	w.Header().Set("Content-Type", contentTypeJSON)
 	w.WriteHeader(http.StatusCreated)
-	w.Write(responseBody)
+	writeResponse(w, responseBody)
 }
 
 type createShortURLResult struct {
@@ -198,4 +198,10 @@ func (h *CreateHandler) createShortURL(w http.ResponseWriter, r *http.Request, o
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	http.Error(w, msg, status)
+}
+
+func writeResponse(w http.ResponseWriter, body []byte) {
+	if _, err := w.Write(body); err != nil {
+		log.Error().Err(err).Msg("failed to write http response")
+	}
 }

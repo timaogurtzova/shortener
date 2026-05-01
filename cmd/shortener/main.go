@@ -48,7 +48,10 @@ func run() error {
 	}
 
 	// Собираем сервисный и HTTP-слои приложения.
-	svc := service.NewShortenerService(repo)
+	serviceCtx, cancelService := context.WithCancel(context.Background())
+	defer cancelService()
+
+	svc := service.NewShortenerService(serviceCtx, repo)
 	authSecret, err := auth.NewRandomSecret(32)
 	if err != nil {
 		return fmt.Errorf("generate auth secret: %w", err)

@@ -24,16 +24,22 @@ var ErrURLDeleted = errors.New("url deleted")
 type ShortenerService struct {
 	repo        repository.URLRepository
 	deleteQueue chan deleteRequest
+	workerDone  chan struct{}
 }
 
 // NewShortenerService создаёт сервис
-func NewShortenerService(repo repository.URLRepository) *ShortenerService {
+func NewShortenerService(ctx context.Context, repo repository.URLRepository) *ShortenerService {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	svc := &ShortenerService{
 		repo:        repo,
 		deleteQueue: make(chan deleteRequest, deleteQueueSize),
+		workerDone:  make(chan struct{}),
 	}
 
-	go svc.runDeleteWorker()
+	go svc.runDeleteWorker(ctx)
 
 	return svc
 }

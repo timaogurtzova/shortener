@@ -54,7 +54,7 @@ func TestShortenerService_Create(t *testing.T) {
 			mockRepo := &mockURLRepository{
 				storeFunc: tt.mockStoreFunc,
 			}
-			svc := service.NewShortenerService(mockRepo)
+			svc := service.NewShortenerService(context.Background(), mockRepo)
 
 			id, err := svc.Create(context.Background(), "https://example.com", "user-1")
 			if tt.wantErr {
@@ -109,7 +109,7 @@ func TestShortenerService_Resolve(t *testing.T) {
 			mockRepo := &mockURLRepository{
 				loadFunc: tt.mockLoad,
 			}
-			svc := service.NewShortenerService(mockRepo)
+			svc := service.NewShortenerService(context.Background(), mockRepo)
 
 			url, err := svc.Resolve(context.Background(), "abc123")
 			if tt.wantErr {
@@ -164,7 +164,7 @@ func TestShortenerService_CreateBatch(t *testing.T) {
 			mockRepo := &mockURLRepository{
 				batchStoreFunc: tt.mockBatchStoreFunc,
 			}
-			svc := service.NewShortenerService(mockRepo)
+			svc := service.NewShortenerService(context.Background(), mockRepo)
 
 			ids, err := svc.CreateBatch(context.Background(), tt.urls, "user-1")
 			if tt.wantErr {
@@ -193,7 +193,7 @@ func TestShortenerService_FindByUserID(t *testing.T) {
 		},
 	}
 
-	svc := service.NewShortenerService(mockRepo)
+	svc := service.NewShortenerService(context.Background(), mockRepo)
 
 	actual, err := svc.FindByUserID(context.Background(), "user-1")
 	assert.NoError(t, err)
@@ -211,7 +211,10 @@ func TestShortenerService_DeleteUserURLs(t *testing.T) {
 		},
 	}
 
-	svc := service.NewShortenerService(mockRepo)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc := service.NewShortenerService(ctx, mockRepo)
 	require.NoError(t, svc.DeleteUserURLs(context.Background(), "user-1", []string{"abc123", "def456", "abc123"}))
 
 	select {

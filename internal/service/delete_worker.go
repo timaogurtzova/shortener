@@ -21,7 +21,14 @@ type deleteRequest struct {
 }
 
 // DeleteUserURLs принимает запрос на асинхронное удаление URL пользователя.
-func (s *ShortenerService) DeleteUserURLs(_ context.Context, userID string, shortIDs []string) error {
+func (s *ShortenerService) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	if userID == "" {
 		return nil
 	}
@@ -36,16 +43,18 @@ func (s *ShortenerService) DeleteUserURLs(_ context.Context, userID string, shor
 
 	select {
 	case s.deleteQueue <- request:
-	default:
-		go func() {
-			s.deleteQueue <- request
-		}()
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.workerDone:
+		return nil
 	}
 
 	return nil
 }
 
-func (s *ShortenerService) runDeleteWorker() {
+func (s *ShortenerService) runDeleteWorker(ctx context.Context) {
+	defer close(s.workerDone)
+
 	ticker := time.NewTicker(deleteFlushInterval)
 	defer ticker.Stop()
 
@@ -88,6 +97,9 @@ func (s *ShortenerService) runDeleteWorker() {
 			}
 		case <-ticker.C:
 			flush()
+		case <-ctx.Done():
+			flush()
+			return
 		}
 	}
 }
