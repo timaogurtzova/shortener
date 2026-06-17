@@ -4,8 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
-	"math/big"
-	"strings"
 
 	"github.com/timaogurtzova/shortener/internal/model"
 	"github.com/timaogurtzova/shortener/internal/repository"
@@ -13,6 +11,7 @@ import (
 
 const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 const maxGenerateAttempts = 10
+const randomByteLimit = byte(256 - 256%len(letters))
 
 // ErrURLAlreadyExists возвращается, когда исходный URL уже был сокращён ранее.
 var ErrURLAlreadyExists = errors.New("url already exists")
@@ -115,18 +114,35 @@ func (s *ShortenerService) FindByUserID(ctx context.Context, userID string) ([]m
 
 // GenerateID создаёт случайный ID длиной n
 func GenerateID(n int) (string, error) {
-	var result strings.Builder
-	result.Grow(n)
-
-	for i := 0; i < n; i++ {
-		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
-		if err != nil {
-			return "", err
-		}
-		result.WriteByte(letters[num.Int64()])
+	if n < 0 {
+		return "", errors.New("invalid id length")
+	}
+	if n == 0 {
+		return "", nil
 	}
 
-	return result.String(), nil
+	result := make([]byte, n)
+	randomBytes := make([]byte, n)
+
+	for i := 0; i < n; {
+		if _, err := rand.Read(randomBytes); err != nil {
+			return "", err
+		}
+
+		for _, randomByte := range randomBytes {
+			if randomByte >= randomByteLimit {
+				continue
+			}
+
+			result[i] = letters[int(randomByte)%len(letters)]
+			i++
+			if i == n {
+				break
+			}
+		}
+	}
+
+	return string(result), nil
 }
 
 func buildBatchRecords(urls []string, userID string) ([]repository.BatchRecord, []string, error) {

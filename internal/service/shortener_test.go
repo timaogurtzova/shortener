@@ -225,14 +225,91 @@ func TestShortenerService_DeleteUserURLs(t *testing.T) {
 	}
 }
 
-var benchmarkGeneratedID string
+var (
+	benchmarkID  string
+	benchmarkIDs []string
+	benchmarkURL string
+)
 
 func BenchmarkGenerateID(b *testing.B) {
+	b.ReportAllocs()
+
 	for i := 0; i < b.N; i++ {
 		id, err := service.GenerateID(8)
 		if err != nil {
 			b.Fatal(err)
 		}
-		benchmarkGeneratedID = id
+		benchmarkID = id
+	}
+}
+
+func BenchmarkShortenerServiceCreate(b *testing.B) {
+	b.ReportAllocs()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc := service.NewShortenerService(ctx, &mockURLRepository{
+		storeFunc: func(ctx context.Context, id, url, userID string) error {
+			return nil
+		},
+	})
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		id, err := svc.Create(ctx, "https://example.com/articles/benchmark", "user-1")
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchmarkID = id
+	}
+}
+
+func BenchmarkShortenerServiceCreateBatch(b *testing.B) {
+	b.ReportAllocs()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	urls := make([]string, 100)
+	for i := range urls {
+		urls[i] = "https://example.com/articles/benchmark"
+	}
+
+	svc := service.NewShortenerService(ctx, &mockURLRepository{
+		batchStoreFunc: func(ctx context.Context, records []repository.BatchRecord) error {
+			return nil
+		},
+	})
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ids, err := svc.CreateBatch(ctx, urls, "user-1")
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchmarkIDs = ids
+	}
+}
+
+func BenchmarkShortenerServiceResolve(b *testing.B) {
+	b.ReportAllocs()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc := service.NewShortenerService(ctx, &mockURLRepository{
+		loadFunc: func(ctx context.Context, id string) (string, error) {
+			return "https://example.com/articles/benchmark", nil
+		},
+	})
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		url, err := svc.Resolve(ctx, "abc12345")
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchmarkURL = url
 	}
 }
