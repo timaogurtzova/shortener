@@ -104,6 +104,20 @@ func (a *Authenticator) UserIDForHistory(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// UserID возвращает существующий валидный user ID, не создавая новую cookie.
+func (a *Authenticator) UserID(r *http.Request) (string, bool, error) {
+	userID, state, err := a.resolveUserID(r)
+	if err != nil {
+		return "", false, err
+	}
+
+	if state == cookieStateValid {
+		return userID, true, nil
+	}
+
+	return "", false, nil
+}
+
 func (a *Authenticator) resolveUserID(r *http.Request) (string, cookieState, error) {
 	cookie, err := r.Cookie(a.cookieName)
 	if err != nil {

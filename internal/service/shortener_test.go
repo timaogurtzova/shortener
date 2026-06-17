@@ -224,3 +224,15 @@ func TestShortenerService_DeleteUserURLs(t *testing.T) {
 		t.Fatal("delete request was not processed asynchronously")
 	}
 }
+
+var benchmarkGeneratedID string
+
+func BenchmarkGenerateID(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		id, err := service.GenerateID(8)
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchmarkGeneratedID = id
+	}
+}

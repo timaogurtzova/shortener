@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog/log"
+	"github.com/timaogurtzova/shortener/internal/audit"
 	"github.com/timaogurtzova/shortener/internal/service"
 )
 
@@ -22,10 +23,15 @@ type CreateHandler struct {
 	service service.URLShortener
 	baseURL string
 	auth    userAuthenticator
+	auditor auditNotifier
 }
 
 func NewCreateHandler(service service.URLShortener, baseURL string, authenticator userAuthenticator) *CreateHandler {
 	return &CreateHandler{service: service, baseURL: baseURL, auth: authenticator}
+}
+
+func (h *CreateHandler) SetAuditPublisher(publisher auditNotifier) {
+	h.auditor = publisher
 }
 
 func (h *CreateHandler) CreateShortURLPlainText(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +67,9 @@ func (h *CreateHandler) CreateShortURLPlainText(w http.ResponseWriter, r *http.R
 	w.Header().Set("Content-Type", contentTypeText)
 	w.WriteHeader(shortURL.statusCode)
 	writeResponse(w, []byte(shortURL.value))
+	if shortURL.statusCode == http.StatusCreated {
+		publishAuditEvent(r.Context(), h.auditor, audit.ActionShorten, shortURL.userID, originalURL)
+	}
 }
 
 func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Request) {
@@ -99,6 +108,9 @@ func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", contentTypeJSON)
 	w.WriteHeader(shortURL.statusCode)
 	writeResponse(w, responseBody)
+	if shortURL.statusCode == http.StatusCreated {
+		publishAuditEvent(r.Context(), h.auditor, audit.ActionShorten, shortURL.userID, originalURL)
+	}
 }
 
 func (h *CreateHandler) CreateShortURLBatchJSON(w http.ResponseWriter, r *http.Request) {
@@ -170,6 +182,7 @@ func (h *CreateHandler) CreateShortURLBatchJSON(w http.ResponseWriter, r *http.R
 type createShortURLResult struct {
 	value      string
 	statusCode int
+	userID     string
 }
 
 func (h *CreateHandler) createShortURL(w http.ResponseWriter, r *http.Request, originalURL string) (createShortURLResult, error) {
@@ -184,6 +197,7 @@ func (h *CreateHandler) createShortURL(w http.ResponseWriter, r *http.Request, o
 			return createShortURLResult{
 				value:      h.baseURL + "/" + shortID,
 				statusCode: http.StatusConflict,
+				userID:     userID,
 			}, nil
 		}
 
@@ -193,6 +207,7 @@ func (h *CreateHandler) createShortURL(w http.ResponseWriter, r *http.Request, o
 	return createShortURLResult{
 		value:      h.baseURL + "/" + shortID,
 		statusCode: http.StatusCreated,
+		userID:     userID,
 	}, nil
 }
 

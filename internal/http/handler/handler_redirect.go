@@ -5,16 +5,28 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog/log"
+	"github.com/timaogurtzova/shortener/internal/audit"
 	"github.com/timaogurtzova/shortener/internal/service"
 )
 
 // RedirectHandler обрабатывает GET /{id} запрос на редирект по короткому URL
 type RedirectHandler struct {
-	service service.URLShortener
+	service        service.URLShortener
+	auditor        auditNotifier
+	userIDResolver userIDResolver
 }
 
 func NewRedirectHandler(service service.URLShortener) *RedirectHandler {
 	return &RedirectHandler{service: service}
+}
+
+func (h *RedirectHandler) SetAuditPublisher(publisher auditNotifier) {
+	h.auditor = publisher
+}
+
+func (h *RedirectHandler) SetUserIDResolver(resolver userIDResolver) {
+	h.userIDResolver = resolver
 }
 
 func (h *RedirectHandler) Redirect(w http.ResponseWriter, r *http.Request) {
@@ -40,4 +52,22 @@ func (h *RedirectHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 	// Формирование HTTP-ответа
 	w.Header().Set("Location", originalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
+	publishAuditEvent(r.Context(), h.auditor, audit.ActionFollow, h.userID(r), originalURL)
+}
+
+func (h *RedirectHandler) userID(r *http.Request) string {
+	if h.userIDResolver == nil {
+		return ""
+	}
+
+	userID, ok, err := h.userIDResolver.UserID(r)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to resolve user id for audit")
+		return ""
+	}
+	if !ok {
+		return ""
+	}
+
+	return userID
 }

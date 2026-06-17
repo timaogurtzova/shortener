@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/rs/zerolog/log"
+	"github.com/timaogurtzova/shortener/internal/audit"
 	"github.com/timaogurtzova/shortener/internal/auth"
 	"github.com/timaogurtzova/shortener/internal/config"
 	httpserver "github.com/timaogurtzova/shortener/internal/http"
@@ -12,6 +14,12 @@ import (
 	"github.com/timaogurtzova/shortener/internal/postgres"
 	"github.com/timaogurtzova/shortener/internal/repository"
 	"github.com/timaogurtzova/shortener/internal/service"
+)
+
+const (
+	auditQueueSize       = 1024
+	auditDeliveryTimeout = 2 * time.Second
+	auditShutdownTimeout = 5 * time.Second
 )
 
 func main() {
@@ -62,9 +70,24 @@ func run() error {
 		return fmt.Errorf("initialize authenticator: %w", err)
 	}
 
+	auditDispatcher, err := newAuditDispatcher(cfg.Audit)
+	if err != nil {
+		return fmt.Errorf("initialize audit dispatcher: %w", err)
+	}
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), auditShutdownTimeout)
+		defer cancel()
+		if err := auditDispatcher.Close(closeCtx); err != nil {
+			log.Error().Err(err).Msg("failed to close audit dispatcher")
+		}
+	}()
+
 	createHandler := handler.NewCreateHandler(svc, cfg.Server.BaseURL, authenticator)
 	userHandler := handler.NewUserHandler(svc, cfg.Server.BaseURL, authenticator)
 	redirectHandler := handler.NewRedirectHandler(svc)
+	createHandler.SetAuditPublisher(auditDispatcher)
+	redirectHandler.SetAuditPublisher(auditDispatcher)
+	redirectHandler.SetUserIDResolver(authenticator)
 	pingHandler := handler.NewPingHandler(database)
 	router := httpserver.NewRouter(httpserver.RouterHandlers{
 		CreateShortURLPlainText: createHandler.CreateShortURLPlainText,
@@ -83,6 +106,31 @@ func run() error {
 	}
 
 	return nil
+}
+
+func newAuditDispatcher(cfg config.AuditConfiguration) (*audit.Dispatcher, error) {
+	publisher := audit.NewPublisher()
+
+	if cfg.FileEnabled() {
+		fileObserver, err := audit.NewFileObserver(*cfg.FilePath)
+		if err != nil {
+			return nil, err
+		}
+		publisher.Register(fileObserver)
+	}
+
+	if cfg.RemoteEnabled() {
+		httpObserver, err := audit.NewHTTPObserver(*cfg.URL)
+		if err != nil {
+			return nil, err
+		}
+		publisher.Register(httpObserver)
+	}
+
+	return audit.NewDispatcher(publisher, audit.DispatcherConfig{
+		QueueSize:       auditQueueSize,
+		DeliveryTimeout: auditDeliveryTimeout,
+	}), nil
 }
 
 // newURLRepository выбирает хранилище URL по приоритету:
