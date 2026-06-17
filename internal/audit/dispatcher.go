@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// ErrDispatcherClosed возвращается при попытке поставить событие в закрытый диспетчер.
 var ErrDispatcherClosed = errors.New("audit dispatcher is closed")
 
 // Dispatcher принимает события аудита и доставляет их подписчикам из фонового воркера.
@@ -23,8 +24,12 @@ type Dispatcher struct {
 	deliveryTimeout time.Duration
 }
 
+// DispatcherConfig описывает параметры асинхронной доставки событий аудита.
 type DispatcherConfig struct {
-	QueueSize       int
+	// QueueSize задаёт размер буфера очереди событий.
+	QueueSize int
+
+	// DeliveryTimeout ограничивает время доставки одного события наблюдателям.
 	DeliveryTimeout time.Duration
 }
 

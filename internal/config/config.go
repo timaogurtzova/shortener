@@ -12,34 +12,60 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// Configuration объединяет все настройки приложения.
 type Configuration struct {
-	Server   ServerConfiguration
-	Storage  StorageConfiguration
+	// Server хранит настройки HTTP-сервера.
+	Server ServerConfiguration
+
+	// Storage хранит настройки файлового хранилища.
+	Storage StorageConfiguration
+
+	// Database хранит настройки подключения к базе данных.
 	Database DatabaseConfiguration
-	Audit    AuditConfiguration
+
+	// Audit хранит настройки приёмников аудита.
+	Audit AuditConfiguration
 }
 
 const defaultFileStoragePath = "storage.json"
 
+// ServerConfiguration описывает настройки HTTP-сервера.
 type ServerConfiguration struct {
-	Address      string
-	BaseURL      string
-	IdleTimeout  time.Duration
-	ReadTimeout  time.Duration
+	// Address задаёт адрес прослушивания HTTP-сервера.
+	Address string
+
+	// BaseURL задаёт базовый URL для формирования коротких ссылок.
+	BaseURL string
+
+	// IdleTimeout задаёт максимальное время ожидания неактивного соединения.
+	IdleTimeout time.Duration
+
+	// ReadTimeout задаёт максимальное время чтения HTTP-запроса.
+	ReadTimeout time.Duration
+
+	// WriteTimeout задаёт максимальное время записи HTTP-ответа.
 	WriteTimeout time.Duration
 }
 
+// StorageConfiguration описывает настройки файлового хранилища.
 type StorageConfiguration struct {
+	// FileStoragePath хранит путь к файлу хранилища, если он был явно задан.
 	FileStoragePath *string
 }
 
+// DatabaseConfiguration описывает настройки подключения к базе данных.
 type DatabaseConfiguration struct {
+	// DSN хранит строку подключения к базе данных, если она была явно задана.
 	DSN *string
 }
 
+// AuditConfiguration описывает настройки приёмников аудита.
 type AuditConfiguration struct {
+	// FilePath хранит путь к JSONL-файлу аудита, если файловый аудит включён.
 	FilePath *string
-	URL      *string
+
+	// URL хранит адрес удалённого HTTP-приёмника аудита, если удалённый аудит включён.
+	URL *string
 }
 
 // IsConfigured сообщает, что путь к файловому хранилищу был явно задан через env или CLI.

@@ -10,25 +10,29 @@ import (
 	"github.com/timaogurtzova/shortener/internal/service"
 )
 
-// RedirectHandler обрабатывает GET /{id} запрос на редирект по короткому URL
+// RedirectHandler обрабатывает GET /{id} запрос на редирект по короткому URL.
 type RedirectHandler struct {
 	service        service.URLShortener
 	auditor        auditNotifier
 	userIDResolver userIDResolver
 }
 
+// NewRedirectHandler создаёт обработчик перехода по короткому URL.
 func NewRedirectHandler(service service.URLShortener) *RedirectHandler {
 	return &RedirectHandler{service: service}
 }
 
+// SetAuditPublisher подключает издатель событий аудита к обработчику редиректа.
 func (h *RedirectHandler) SetAuditPublisher(publisher auditNotifier) {
 	h.auditor = publisher
 }
 
+// SetUserIDResolver подключает чтение user ID для событий аудита редиректа.
 func (h *RedirectHandler) SetUserIDResolver(resolver userIDResolver) {
 	h.userIDResolver = resolver
 }
 
+// Redirect обрабатывает переход по короткому идентификатору и возвращает HTTP-редирект.
 func (h *RedirectHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 	// Валидация пути
 	id := chi.URLParam(r, "id")

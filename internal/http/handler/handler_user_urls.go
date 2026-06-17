@@ -10,17 +10,19 @@ import (
 	"github.com/timaogurtzova/shortener/internal/service"
 )
 
-// UserHandler обслуживает endpoints, завязанные на пользователя.
+// UserHandler обслуживает эндпоинты, завязанные на пользователя.
 type UserHandler struct {
 	service service.URLShortener
 	baseURL string
 	auth    userAuthenticator
 }
 
+// NewUserHandler создаёт обработчик пользовательской истории коротких URL.
 func NewUserHandler(service service.URLShortener, baseURL string, authenticator userAuthenticator) *UserHandler {
 	return &UserHandler{service: service, baseURL: baseURL, auth: authenticator}
 }
 
+// GetUserURLs обрабатывает GET /api/user/urls и возвращает URL пользователя.
 func (h *UserHandler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, err := h.auth.UserIDForHistory(w, r)
 	if err != nil {
@@ -63,6 +65,7 @@ func (h *UserHandler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	writeResponse(w, responseBody)
 }
 
+// DeleteUserURLs обрабатывает DELETE /api/user/urls и ставит URL пользователя в очередь удаления.
 func (h *UserHandler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), contentTypeJSON) {
 		writeError(w, http.StatusBadRequest, "bad request")

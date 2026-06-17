@@ -15,10 +15,12 @@ type gzipBodyReadCloser struct {
 	body   io.ReadCloser
 }
 
+// Read читает распакованные данные из gzip.Reader.
 func (g *gzipBodyReadCloser) Read(p []byte) (int, error) {
 	return g.reader.Read(p)
 }
 
+// Close закрывает gzip.Reader и исходное тело запроса.
 func (g *gzipBodyReadCloser) Close() error {
 	if err := g.reader.Close(); err != nil {
 		_ = g.body.Close()
@@ -28,6 +30,7 @@ func (g *gzipBodyReadCloser) Close() error {
 	return g.body.Close()
 }
 
+// GunzipRequest распаковывает тело запроса с Content-Encoding: gzip.
 func GunzipRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		encoding, ok := requestContentEncoding(r.Header.Values("Content-Encoding"))

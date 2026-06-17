@@ -19,6 +19,7 @@ const (
 	contentTypeJSON  = "application/json"
 )
 
+// CreateHandler обрабатывает запросы на создание коротких URL.
 type CreateHandler struct {
 	service service.URLShortener
 	baseURL string
@@ -26,14 +27,17 @@ type CreateHandler struct {
 	auditor auditNotifier
 }
 
+// NewCreateHandler создаёт обработчик создания коротких URL.
 func NewCreateHandler(service service.URLShortener, baseURL string, authenticator userAuthenticator) *CreateHandler {
 	return &CreateHandler{service: service, baseURL: baseURL, auth: authenticator}
 }
 
+// SetAuditPublisher подключает издатель событий аудита к обработчику создания URL.
 func (h *CreateHandler) SetAuditPublisher(publisher auditNotifier) {
 	h.auditor = publisher
 }
 
+// CreateShortURLPlainText обрабатывает POST / с исходным URL в text/plain теле запроса.
 func (h *CreateHandler) CreateShortURLPlainText(w http.ResponseWriter, r *http.Request) {
 	// Проверяем Content-Type (допускаем charset)
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), contentTypeText) {
@@ -72,6 +76,7 @@ func (h *CreateHandler) CreateShortURLPlainText(w http.ResponseWriter, r *http.R
 	}
 }
 
+// CreateShortURLJSON обрабатывает POST /api/shorten с исходным URL в JSON-теле запроса.
 func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), contentTypeJSON) {
 		writeError(w, http.StatusBadRequest, "bad request")
@@ -113,6 +118,7 @@ func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// CreateShortURLBatchJSON обрабатывает POST /api/shorten/batch для пакетного сокращения URL.
 func (h *CreateHandler) CreateShortURLBatchJSON(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), contentTypeJSON) {
 		writeError(w, http.StatusBadRequest, "bad request")

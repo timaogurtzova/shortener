@@ -12,7 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/stretchr/testify/assert"
-	"github.com/timaogurtzova/shortener/internal/http"
+	httpserver "github.com/timaogurtzova/shortener/internal/http"
 )
 
 func TestServerRouting(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"github.com/timaogurtzova/shortener/internal/model"
 )
 
-// InMemoryStore потокобезопасное хранилище URL в памяти.
+// InMemoryStore потокобезопасно хранит URL в оперативной памяти.
 type InMemoryStore struct {
 	mu            sync.RWMutex
 	store         map[string]string
@@ -17,7 +17,7 @@ type InMemoryStore struct {
 	userShortSet  map[string]map[string]struct{}
 }
 
-// NewInMemoryStore создаёт новое in-memory хранилище.
+// NewInMemoryStore создаёт новое хранилище URL в оперативной памяти.
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
 		store:         make(map[string]string),
@@ -28,7 +28,7 @@ func NewInMemoryStore() *InMemoryStore {
 	}
 }
 
-// Store сохраняет URL по ID.
+// Store сохраняет URL по короткому идентификатору.
 func (s *InMemoryStore) Store(_ context.Context, id, url, userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -80,7 +80,7 @@ func (s *InMemoryStore) BatchStore(_ context.Context, records []BatchRecord) err
 	return nil
 }
 
-// Load возвращает URL по ID.
+// Load возвращает URL по короткому идентификатору.
 func (s *InMemoryStore) Load(_ context.Context, id string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

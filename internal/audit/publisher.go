@@ -9,7 +9,10 @@ import (
 
 // Observer получает события аудита от издателя.
 type Observer interface {
+	// ID возвращает стабильный идентификатор наблюдателя.
 	ID() string
+
+	// Update обрабатывает одно событие аудита.
 	Update(context.Context, Event) error
 }
 
