@@ -16,8 +16,11 @@ var ErrDispatcherClosed = errors.New("audit dispatcher is closed")
 type Dispatcher struct {
 	publisher       *Publisher
 	events          chan Event
-	done            chan struct{}
+	closing         chan struct{}
+	stop            chan struct{}
 	mu              sync.Mutex
+	enqueueCond     *sync.Cond
+	activeEnqueues  int
 	closed          bool
 	closeOnce       sync.Once
 	wg              sync.WaitGroup
@@ -42,9 +45,11 @@ func NewDispatcher(publisher *Publisher, cfg DispatcherConfig) *Dispatcher {
 	dispatcher := &Dispatcher{
 		publisher:       publisher,
 		events:          make(chan Event, cfg.QueueSize),
-		done:            make(chan struct{}),
+		closing:         make(chan struct{}),
+		stop:            make(chan struct{}),
 		deliveryTimeout: cfg.DeliveryTimeout,
 	}
+	dispatcher.enqueueCond = sync.NewCond(&dispatcher.mu)
 
 	dispatcher.wg.Add(1)
 	go dispatcher.run()
@@ -60,17 +65,15 @@ func (d *Dispatcher) Notify(_ context.Context, event Event) error {
 		return nil
 	}
 
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	if d.closed {
+	if !d.startEnqueue() {
 		return ErrDispatcherClosed
 	}
+	defer d.finishEnqueue()
 
 	select {
 	case d.events <- event:
 		return nil
-	case <-d.done:
+	case <-d.closing:
 		return ErrDispatcherClosed
 	}
 }
@@ -86,10 +89,14 @@ func (d *Dispatcher) Close(ctx context.Context) error {
 
 	d.closeOnce.Do(func() {
 		d.mu.Lock()
-		defer d.mu.Unlock()
-
 		d.closed = true
-		close(d.done)
+		close(d.closing)
+
+		for d.activeEnqueues > 0 {
+			d.enqueueCond.Wait()
+		}
+		close(d.stop)
+		d.mu.Unlock()
 	})
 
 	closed := make(chan struct{})
@@ -100,9 +107,31 @@ func (d *Dispatcher) Close(ctx context.Context) error {
 
 	select {
 	case <-closed:
-		return nil
+		return d.publisher.Close()
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+func (d *Dispatcher) startEnqueue() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.closed {
+		return false
+	}
+
+	d.activeEnqueues++
+	return true
+}
+
+func (d *Dispatcher) finishEnqueue() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	d.activeEnqueues--
+	if d.closed && d.activeEnqueues == 0 {
+		d.enqueueCond.Broadcast()
 	}
 }
 
@@ -113,7 +142,7 @@ func (d *Dispatcher) run() {
 		select {
 		case event := <-d.events:
 			d.deliver(event)
-		case <-d.done:
+		case <-d.stop:
 			d.drain()
 			return
 		}

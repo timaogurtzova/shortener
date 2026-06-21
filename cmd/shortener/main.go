@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -122,6 +123,12 @@ func newAuditDispatcher(cfg config.AuditConfiguration) (*audit.Dispatcher, error
 	if cfg.RemoteEnabled() {
 		httpObserver, err := audit.NewHTTPObserver(*cfg.URL)
 		if err != nil {
+			if closeErr := publisher.Close(); closeErr != nil {
+				return nil, errors.Join(
+					fmt.Errorf("create http audit observer: %w", err),
+					fmt.Errorf("close audit observers: %w", closeErr),
+				)
+			}
 			return nil, err
 		}
 		publisher.Register(httpObserver)

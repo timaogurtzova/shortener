@@ -22,6 +22,9 @@ func TestFileObserverAppendsEvents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "audit.log")
 	observer, err := audit.NewFileObserver(path)
 	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, observer.Close())
+	}()
 
 	first := audit.Event{
 		Timestamp: 123,
@@ -52,6 +55,22 @@ func TestFileObserverAppendsEvents(t *testing.T) {
 	var gotSecond audit.Event
 	require.NoError(t, json.Unmarshal([]byte(lines[1]), &gotSecond))
 	assert.Equal(t, second, gotSecond)
+}
+
+func TestFileObserverRejectsUpdatesAfterClose(t *testing.T) {
+	observer, err := audit.NewFileObserver(filepath.Join(t.TempDir(), "audit.log"))
+	require.NoError(t, err)
+
+	require.NoError(t, observer.Close())
+	require.NoError(t, observer.Close())
+
+	err = observer.Update(context.Background(), audit.Event{
+		Timestamp: 123,
+		Action:    audit.ActionShorten,
+		URL:       "https://example.com",
+	})
+
+	require.Error(t, err)
 }
 
 func TestHTTPObserverPostsEvent(t *testing.T) {
@@ -136,6 +155,98 @@ func TestPublisherContinuesAfterObserverError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed")
 	assert.Equal(t, []audit.Event{event}, recorded.events)
+}
+
+func TestPublisherNotifiesObserversConcurrently(t *testing.T) {
+	publisher := audit.NewPublisher()
+	started := make(chan string, 3)
+	release := make(chan struct{})
+	publisher.Register(&barrierObserver{id: "first", started: started, release: release})
+	publisher.Register(&barrierObserver{id: "second", started: started, release: release})
+	publisher.Register(&barrierObserver{id: "third", started: started, release: release})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- publisher.Notify(context.Background(), audit.Event{
+			Timestamp: 123,
+			Action:    audit.ActionFollow,
+			URL:       "https://example.com",
+		})
+	}()
+
+	for i := 0; i < 3; i++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("not all observers were started concurrently")
+		}
+	}
+
+	close(release)
+
+	err := <-done
+	require.NoError(t, err)
+}
+
+func TestPublisherCloseWaitsForActiveNotify(t *testing.T) {
+	publisher := audit.NewPublisher()
+	observer := &closeableBlockingObserver{
+		id:      "blocking",
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		closed:  make(chan struct{}),
+	}
+	publisher.Register(observer)
+
+	notified := make(chan error, 1)
+	go func() {
+		notified <- publisher.Notify(context.Background(), audit.Event{
+			Timestamp: 123,
+			Action:    audit.ActionFollow,
+			URL:       "https://example.com",
+		})
+	}()
+
+	select {
+	case <-observer.started:
+	case <-time.After(time.Second):
+		t.Fatal("observer was not called")
+	}
+
+	closed := make(chan error, 1)
+	go func() {
+		closed <- publisher.Close()
+	}()
+
+	select {
+	case err := <-closed:
+		t.Fatalf("publisher was closed before active notify finished: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(observer.release)
+
+	require.NoError(t, <-notified)
+	require.NoError(t, <-closed)
+
+	select {
+	case <-observer.closed:
+	case <-time.After(time.Second):
+		t.Fatal("observer was not closed")
+	}
+}
+
+func TestPublisherRejectsNotifyAfterClose(t *testing.T) {
+	publisher := audit.NewPublisher()
+	require.NoError(t, publisher.Close())
+
+	err := publisher.Notify(context.Background(), audit.Event{
+		Timestamp: 123,
+		Action:    audit.ActionFollow,
+		URL:       "https://example.com",
+	})
+
+	assert.ErrorIs(t, err, audit.ErrPublisherClosed)
 }
 
 func TestDispatcherIgnoresCanceledNotifyContext(t *testing.T) {
@@ -260,6 +371,105 @@ func TestDispatcherWaitsUntilQueueHasSpace(t *testing.T) {
 	}
 }
 
+func TestDispatcherCloseUnblocksWaitingNotify(t *testing.T) {
+	publisher := audit.NewPublisher()
+	observer := &blockingObserver{
+		id:      "blocking",
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	publisher.Register(observer)
+
+	dispatcher := audit.NewDispatcher(publisher, audit.DispatcherConfig{
+		QueueSize:       1,
+		DeliveryTimeout: 20 * time.Millisecond,
+	})
+
+	require.NoError(t, dispatcher.Notify(context.Background(), audit.Event{
+		Timestamp: 123,
+		Action:    audit.ActionShorten,
+		URL:       "https://example.com/one",
+	}))
+
+	select {
+	case <-observer.started:
+	case <-time.After(time.Second):
+		t.Fatal("blocking observer was not called")
+	}
+
+	require.NoError(t, dispatcher.Notify(context.Background(), audit.Event{
+		Timestamp: 124,
+		Action:    audit.ActionShorten,
+		URL:       "https://example.com/two",
+	}))
+
+	enqueued := make(chan error, 1)
+	go func() {
+		enqueued <- dispatcher.Notify(context.Background(), audit.Event{
+			Timestamp: 125,
+			Action:    audit.ActionShorten,
+			URL:       "https://example.com/three",
+		})
+	}()
+
+	select {
+	case err := <-enqueued:
+		t.Fatalf("event was enqueued before close: %v", err)
+	case <-time.After(10 * time.Millisecond):
+	}
+
+	closed := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		closed <- dispatcher.Close(ctx)
+	}()
+
+	select {
+	case err := <-enqueued:
+		assert.ErrorIs(t, err, audit.ErrDispatcherClosed)
+	case <-time.After(time.Second):
+		t.Fatal("waiting notify was not unblocked by close")
+	}
+
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("dispatcher close did not finish")
+	}
+}
+
+func TestDispatcherCloseDrainsQueuedEvents(t *testing.T) {
+	publisher := audit.NewPublisher()
+	observer := &channelObserver{
+		id:     "recorded",
+		events: make(chan audit.Event, 1),
+	}
+	publisher.Register(observer)
+
+	dispatcher := audit.NewDispatcher(publisher, audit.DispatcherConfig{
+		QueueSize:       1,
+		DeliveryTimeout: time.Second,
+	})
+
+	event := audit.Event{
+		Timestamp: 123,
+		Action:    audit.ActionShorten,
+		URL:       "https://example.com",
+	}
+
+	require.NoError(t, dispatcher.Notify(context.Background(), event))
+	closeDispatcher(t, dispatcher)
+
+	select {
+	case got := <-observer.events:
+		assert.Equal(t, event, got)
+	case <-time.After(time.Second):
+		t.Fatal("queued event was not delivered before dispatcher close")
+	}
+}
+
 func TestDispatcherRejectsEventsAfterClose(t *testing.T) {
 	dispatcher := audit.NewDispatcher(audit.NewPublisher(), audit.DispatcherConfig{
 		QueueSize:       1,
@@ -300,6 +510,61 @@ func (o *failingObserver) ID() string {
 
 func (o *failingObserver) Update(context.Context, audit.Event) error {
 	return errors.New("observer failed")
+}
+
+type barrierObserver struct {
+	id      string
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (o *barrierObserver) ID() string {
+	return o.id
+}
+
+func (o *barrierObserver) Update(ctx context.Context, event audit.Event) error {
+	select {
+	case o.started <- o.id:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	select {
+	case <-o.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+type closeableBlockingObserver struct {
+	id      string
+	started chan struct{}
+	release chan struct{}
+	closed  chan struct{}
+	once    sync.Once
+}
+
+func (o *closeableBlockingObserver) ID() string {
+	return o.id
+}
+
+func (o *closeableBlockingObserver) Update(ctx context.Context, event audit.Event) error {
+	o.once.Do(func() {
+		close(o.started)
+	})
+
+	select {
+	case <-o.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (o *closeableBlockingObserver) Close() error {
+	close(o.closed)
+	return nil
 }
 
 type channelObserver struct {
