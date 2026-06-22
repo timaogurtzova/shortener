@@ -33,7 +33,7 @@ type Authenticator struct {
 	secret     []byte
 }
 
-// NewAuthenticator создаёт новый helper для пользовательской cookie.
+// NewAuthenticator создаёт вспомогательный объект для пользовательской cookie.
 func NewAuthenticator(secret []byte) (*Authenticator, error) {
 	if len(secret) == 0 {
 		return nil, errors.New("auth secret is empty")
@@ -104,6 +104,20 @@ func (a *Authenticator) UserIDForHistory(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// UserID возвращает существующий валидный user ID, не создавая новую cookie.
+func (a *Authenticator) UserID(r *http.Request) (string, bool, error) {
+	userID, state, err := a.resolveUserID(r)
+	if err != nil {
+		return "", false, err
+	}
+
+	if state == cookieStateValid {
+		return userID, true, nil
+	}
+
+	return "", false, nil
+}
+
 func (a *Authenticator) resolveUserID(r *http.Request) (string, cookieState, error) {
 	cookie, err := r.Cookie(a.cookieName)
 	if err != nil {
@@ -133,7 +147,7 @@ func (a *Authenticator) NewCookie(userID string) (*http.Cookie, error) {
 	return a.newCookie(userID, false)
 }
 
-// NewCookieForRequest создаёт подписанную cookie для запроса с учётом transport security.
+// NewCookieForRequest создаёт подписанную cookie для запроса с учётом защищённого транспорта.
 func (a *Authenticator) NewCookieForRequest(userID string, r *http.Request) (*http.Cookie, error) {
 	return a.newCookie(userID, isSecureRequest(r))
 }

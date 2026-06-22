@@ -17,21 +17,36 @@ import (
 	httpmiddleware "github.com/timaogurtzova/shortener/internal/http/middleware"
 )
 
+// Server управляет жизненным циклом HTTP-сервера приложения.
 type Server struct {
 	httpServer *http.Server
 }
 
 // RouterHandlers объединяет HTTP-обработчики роутера по именованным полям.
 type RouterHandlers struct {
+	// CreateShortURLPlainText обрабатывает POST / с исходным URL в теле запроса.
 	CreateShortURLPlainText http.HandlerFunc
-	CreateShortURLJSON      http.HandlerFunc
+
+	// CreateShortURLJSON обрабатывает POST /api/shorten с JSON-телом запроса.
+	CreateShortURLJSON http.HandlerFunc
+
+	// CreateShortURLBatchJSON обрабатывает POST /api/shorten/batch с пакетом URL.
 	CreateShortURLBatchJSON http.HandlerFunc
-	GetUserURLs             http.HandlerFunc
-	DeleteUserURLs          http.HandlerFunc
-	Redirect                http.HandlerFunc
-	Ping                    http.HandlerFunc
+
+	// GetUserURLs обрабатывает GET /api/user/urls для истории пользователя.
+	GetUserURLs http.HandlerFunc
+
+	// DeleteUserURLs обрабатывает DELETE /api/user/urls для удаления URL пользователя.
+	DeleteUserURLs http.HandlerFunc
+
+	// Redirect обрабатывает GET /{id} и перенаправляет на исходный URL.
+	Redirect http.HandlerFunc
+
+	// Ping обрабатывает GET /ping для проверки доступности хранилища.
+	Ping http.HandlerFunc
 }
 
+// NewServer создаёт HTTP-сервер с адресом, роутером и таймаутами из конфигурации.
 func NewServer(cfg *config.Configuration, router http.Handler) *Server {
 	return &Server{
 		httpServer: &http.Server{
@@ -44,13 +59,14 @@ func NewServer(cfg *config.Configuration, router http.Handler) *Server {
 	}
 }
 
+// NewRouter создаёт HTTP-роутер приложения и регистрирует все публичные эндпоинты.
 func NewRouter(handlers RouterHandlers) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(httpmiddleware.Logging)
 	r.Use(httpmiddleware.GunzipRequest)
 	r.Use(chimiddleware.Compress(5, "application/json", "text/html"))
-	// --- Routes ---
+	// Роуты приложения.
 	r.Post("/", handlers.CreateShortURLPlainText)
 	r.Post("/api/shorten", handlers.CreateShortURLJSON)
 	r.Post("/api/shorten/batch", handlers.CreateShortURLBatchJSON)
@@ -59,7 +75,7 @@ func NewRouter(handlers RouterHandlers) http.Handler {
 	r.Get("/ping", handlers.Ping)
 	r.Get("/{id}", handlers.Redirect)
 
-	// --- Fallback ---
+	// Ответы по умолчанию для неизвестных путей и методов.
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusBadRequest)
 	})
@@ -71,9 +87,7 @@ func NewRouter(handlers RouterHandlers) http.Handler {
 	return r
 }
 
-// Run
-// — запускает сервер
-// — обрабатывает graceful shutdown (и по сигналу, и по ошибке сервера)
+// Run запускает HTTP-сервер и выполняет корректное завершение по сигналу ОС или ошибке сервера.
 func (s *Server) Run() error {
 	errChan := make(chan error, 1)
 	// Запуск сервера в отдельной горутине
@@ -104,7 +118,7 @@ func (s *Server) Run() error {
 		}
 	}
 
-	// graceful shutdown
+	// Корректное завершение работы сервера.
 	shutdownTimeout := 10 * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()

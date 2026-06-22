@@ -145,6 +145,92 @@ func TestLoadConfigUsesTimeoutsFromEnvironment(t *testing.T) {
 	assert.Equal(t, 25*time.Second, cfg.Server.WriteTimeout)
 }
 
+func TestLoadConfigUsesAuditSettings(t *testing.T) {
+	tests := []struct {
+		name          string
+		args          []string
+		env           map[string]string
+		wantFilePath  string
+		wantFileAudit bool
+		wantURL       string
+		wantURLAudit  bool
+	}{
+		{
+			name: "audit receivers are disabled by default",
+		},
+		{
+			name:          "uses audit flags",
+			args:          []string{"--audit-file", "/tmp/audit.log", "--audit-url", "http://localhost:9090/audit"},
+			wantFilePath:  "/tmp/audit.log",
+			wantFileAudit: true,
+			wantURL:       "http://localhost:9090/audit",
+			wantURLAudit:  true,
+		},
+		{
+			name: "audit env overrides flags",
+			args: []string{"--audit-file", "/tmp/flag.log", "--audit-url", "http://localhost:9090/flag"},
+			env: map[string]string{
+				"AUDIT_FILE": "/tmp/env.log",
+				"AUDIT_URL":  "http://localhost:9090/env",
+			},
+			wantFilePath:  "/tmp/env.log",
+			wantFileAudit: true,
+			wantURL:       "http://localhost:9090/env",
+			wantURLAudit:  true,
+		},
+		{
+			name: "empty audit env values keep flags",
+			args: []string{"--audit-file", "/tmp/flag.log", "--audit-url", "http://localhost:9090/flag"},
+			env: map[string]string{
+				"AUDIT_FILE": "",
+				"AUDIT_URL":  "",
+			},
+			wantFilePath:  "/tmp/flag.log",
+			wantFileAudit: true,
+			wantURL:       "http://localhost:9090/flag",
+			wantURLAudit:  true,
+		},
+		{
+			name:          "invalid audit url flag disables remote audit",
+			args:          []string{"--audit-url", "ftp://localhost:9090/audit"},
+			wantURLAudit:  false,
+			wantFileAudit: false,
+		},
+		{
+			name: "invalid audit url env keeps flag value",
+			args: []string{"--audit-url", "http://localhost:9090/flag"},
+			env: map[string]string{
+				"AUDIT_URL": "ftp://localhost:9090/env",
+			},
+			wantURL:      "http://localhost:9090/flag",
+			wantURLAudit: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := loadWithState(t, tt.args, tt.env)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.wantFileAudit, cfg.Audit.FileEnabled())
+			if tt.wantFileAudit {
+				require.NotNil(t, cfg.Audit.FilePath)
+				assert.Equal(t, tt.wantFilePath, *cfg.Audit.FilePath)
+			} else {
+				assert.Nil(t, cfg.Audit.FilePath)
+			}
+
+			assert.Equal(t, tt.wantURLAudit, cfg.Audit.RemoteEnabled())
+			if tt.wantURLAudit {
+				require.NotNil(t, cfg.Audit.URL)
+				assert.Equal(t, tt.wantURL, *cfg.Audit.URL)
+			} else {
+				assert.Nil(t, cfg.Audit.URL)
+			}
+		})
+	}
+}
+
 func loadWithState(t *testing.T, args []string, envVars map[string]string) (*config.Configuration, error) {
 	t.Helper()
 
@@ -162,6 +248,8 @@ func loadWithState(t *testing.T, args []string, envVars map[string]string) (*con
 		"SERVER_WRITE_TIMEOUT",
 		"FILE_STORAGE_PATH",
 		"DATABASE_DSN",
+		"AUDIT_FILE",
+		"AUDIT_URL",
 	} {
 		previousValue, wasSet := os.LookupEnv(key)
 

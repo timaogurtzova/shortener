@@ -12,28 +12,60 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// Configuration объединяет все настройки приложения.
 type Configuration struct {
-	Server   ServerConfiguration
-	Storage  StorageConfiguration
+	// Server хранит настройки HTTP-сервера.
+	Server ServerConfiguration
+
+	// Storage хранит настройки файлового хранилища.
+	Storage StorageConfiguration
+
+	// Database хранит настройки подключения к базе данных.
 	Database DatabaseConfiguration
+
+	// Audit хранит настройки приёмников аудита.
+	Audit AuditConfiguration
 }
 
 const defaultFileStoragePath = "storage.json"
 
+// ServerConfiguration описывает настройки HTTP-сервера.
 type ServerConfiguration struct {
-	Address      string
-	BaseURL      string
-	IdleTimeout  time.Duration
-	ReadTimeout  time.Duration
+	// Address задаёт адрес прослушивания HTTP-сервера.
+	Address string
+
+	// BaseURL задаёт базовый URL для формирования коротких ссылок.
+	BaseURL string
+
+	// IdleTimeout задаёт максимальное время ожидания неактивного соединения.
+	IdleTimeout time.Duration
+
+	// ReadTimeout задаёт максимальное время чтения HTTP-запроса.
+	ReadTimeout time.Duration
+
+	// WriteTimeout задаёт максимальное время записи HTTP-ответа.
 	WriteTimeout time.Duration
 }
 
+// StorageConfiguration описывает настройки файлового хранилища.
 type StorageConfiguration struct {
+	// FileStoragePath хранит путь к файлу хранилища, если он был явно задан.
 	FileStoragePath *string
 }
 
+// DatabaseConfiguration описывает настройки подключения к базе данных.
 type DatabaseConfiguration struct {
+	// DSN хранит строку подключения к базе данных, если она была явно задана.
 	DSN *string
+}
+
+// AuditConfiguration описывает настройки приёмников аудита.
+type AuditConfiguration struct {
+	// FilePath хранит путь к JSONL-файлу аудита, если файловый аудит включён.
+	FilePath *string
+
+	// URL хранит адрес удалённого HTTP-приёмника аудита, если удалённый аудит включён.
+	URL *string
 }
 
 // IsConfigured сообщает, что путь к файловому хранилищу был явно задан через env или CLI.
@@ -55,6 +87,16 @@ func (c DatabaseConfiguration) IsConfigured() bool {
 	return c.DSN != nil
 }
 
+// FileEnabled сообщает, что аудит в файл был явно настроен.
+func (c AuditConfiguration) FileEnabled() bool {
+	return c.FilePath != nil
+}
+
+// RemoteEnabled сообщает, что аудит на удалённый сервер был явно настроен.
+func (c AuditConfiguration) RemoteEnabled() bool {
+	return c.URL != nil
+}
+
 // defaultConfig возвращает конфигурацию со значениями по умолчанию.
 func defaultConfig() *Configuration {
 	return &Configuration{
@@ -70,6 +112,10 @@ func defaultConfig() *Configuration {
 		},
 		Database: DatabaseConfiguration{
 			DSN: nil,
+		},
+		Audit: AuditConfiguration{
+			FilePath: nil,
+			URL:      nil,
 		},
 	}
 }
@@ -105,6 +151,8 @@ type cliConfig struct {
 	BaseURL         string
 	FileStoragePath string
 	DatabaseDSN     string
+	AuditFilePath   string
+	AuditURL        string
 }
 
 // envConfig хранит только значения, явно заданные в переменных окружения.
@@ -116,6 +164,8 @@ type envConfig struct {
 	WriteTimeout    *time.Duration `env:"SERVER_WRITE_TIMEOUT"`
 	FileStoragePath *string        `env:"FILE_STORAGE_PATH"`
 	DatabaseDSN     *string        `env:"DATABASE_DSN"`
+	AuditFilePath   *string        `env:"AUDIT_FILE"`
+	AuditURL        *string        `env:"AUDIT_URL"`
 }
 
 // parseCLIArgs разбирает флаги конфигурации из аргументов командной строки.
@@ -131,6 +181,8 @@ func parseCLIArgs(args []string) (cliConfig, error) {
 	fs.StringVar(&cfg.BaseURL, "b", "", "base url")
 	fs.StringVar(&cfg.FileStoragePath, "f", "", "file storage path")
 	fs.StringVar(&cfg.DatabaseDSN, "d", "", "database dsn")
+	fs.StringVar(&cfg.AuditFilePath, "audit-file", "", "audit file path")
+	fs.StringVar(&cfg.AuditURL, "audit-url", "", "audit receiver url")
 
 	if err := fs.Parse(args); err != nil {
 		return cliConfig{}, err
@@ -145,6 +197,8 @@ func applyCLIConfig(cfg *Configuration, cliCfg cliConfig) {
 	cfg.Server.BaseURL = resolveBaseURL(cfg.Server.BaseURL, cliCfg.BaseURL)
 	cfg.Storage.FileStoragePath = resolveFileStoragePath(cliCfg.FileStoragePath)
 	cfg.Database.DSN = resolveDatabaseDSN(cliCfg.DatabaseDSN)
+	cfg.Audit.FilePath = resolveAuditFilePath(cliCfg.AuditFilePath)
+	cfg.Audit.URL = resolveAuditURL(cliCfg.AuditURL)
 }
 
 // applyEnvConfig применяет значения из переменных окружения поверх уже собранной конфигурации.
@@ -197,6 +251,24 @@ func applyEnvConfig(cfg *Configuration, envCfg envConfig) {
 			log.Info().Str("DatabaseDSN", *envCfg.DatabaseDSN).Msg("Overriding DatabaseDSN from environment")
 		} else {
 			log.Warn().Msg("Empty DatabaseDSN from environment, using previous value")
+		}
+	}
+
+	if envCfg.AuditFilePath != nil {
+		if *envCfg.AuditFilePath != "" {
+			cfg.Audit.FilePath = envCfg.AuditFilePath
+			log.Info().Str("AuditFilePath", *envCfg.AuditFilePath).Msg("Overriding AuditFilePath from environment")
+		} else {
+			log.Warn().Msg("Empty AuditFilePath from environment, using previous value")
+		}
+	}
+
+	if envCfg.AuditURL != nil {
+		if *envCfg.AuditURL != "" && isValidHTTPURL(*envCfg.AuditURL) {
+			cfg.Audit.URL = envCfg.AuditURL
+			log.Info().Str("AuditURL", redactURL(*envCfg.AuditURL)).Msg("Overriding AuditURL from environment")
+		} else {
+			log.Warn().Str("AuditURL", redactURLPointer(envCfg.AuditURL)).Msg("Invalid AuditURL from environment, using previous value")
 		}
 	}
 }
@@ -253,6 +325,33 @@ func resolveDatabaseDSN(cliValue string) *string {
 	return nil
 }
 
+// resolveAuditFilePath выбирает путь к файлу аудита из флагов.
+func resolveAuditFilePath(cliValue string) *string {
+	if cliValue != "" {
+		log.Info().Str("AuditFilePath", cliValue).Msg("Overriding AuditFilePath from CLI")
+		value := cliValue
+		return &value
+	}
+
+	log.Info().Msg("Audit file receiver is disabled")
+	return nil
+}
+
+// resolveAuditURL выбирает URL удалённого приёмника аудита из флагов.
+func resolveAuditURL(cliValue string) *string {
+	if cliValue != "" {
+		if isValidHTTPURL(cliValue) {
+			log.Info().Str("AuditURL", redactURL(cliValue)).Msg("Overriding AuditURL from CLI")
+			value := cliValue
+			return &value
+		}
+		log.Warn().Str("AuditURL", redactURL(cliValue)).Msg("Invalid CLI AuditURL, audit receiver is disabled")
+	}
+
+	log.Info().Msg("Remote audit receiver is disabled")
+	return nil
+}
+
 // isValidAddress проверяет, что адрес имеет формат host:port.
 func isValidAddress(addr string) bool {
 	_, err := net.ResolveTCPAddr("tcp", addr)
@@ -263,4 +362,30 @@ func isValidAddress(addr string) bool {
 func isValidURL(raw string) bool {
 	u, err := url.Parse(raw)
 	return err == nil && u.Scheme != "" && u.Host != ""
+}
+
+func isValidHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
+func redactURLPointer(value *string) string {
+	if value == nil {
+		return ""
+	}
+
+	return redactURL(*value)
+}
+
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "<invalid-url>"
+	}
+
+	u.User = nil
+	u.RawQuery = ""
+	u.Fragment = ""
+
+	return u.String()
 }

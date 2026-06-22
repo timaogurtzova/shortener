@@ -4,8 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
-	"math/big"
-	"strings"
 
 	"github.com/timaogurtzova/shortener/internal/model"
 	"github.com/timaogurtzova/shortener/internal/repository"
@@ -13,6 +11,7 @@ import (
 
 const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 const maxGenerateAttempts = 10
+const randomByteLimit = byte(256 - 256%len(letters))
 
 // ErrURLAlreadyExists возвращается, когда исходный URL уже был сокращён ранее.
 var ErrURLAlreadyExists = errors.New("url already exists")
@@ -20,14 +19,14 @@ var ErrURLAlreadyExists = errors.New("url already exists")
 // ErrURLDeleted возвращается, когда короткий URL помечен как удалённый.
 var ErrURLDeleted = errors.New("url deleted")
 
-// ShortenerService хранит mapping id → URL
+// ShortenerService реализует бизнес-логику сокращения, поиска и удаления URL.
 type ShortenerService struct {
 	repo        repository.URLRepository
 	deleteQueue chan deleteRequest
 	workerDone  chan struct{}
 }
 
-// NewShortenerService создаёт сервис
+// NewShortenerService создаёт сервис сокращения URL и запускает фоновый воркер удаления.
 func NewShortenerService(ctx context.Context, repo repository.URLRepository) *ShortenerService {
 	if ctx == nil {
 		ctx = context.Background()
@@ -44,7 +43,7 @@ func NewShortenerService(ctx context.Context, repo repository.URLRepository) *Sh
 	return svc
 }
 
-// Create сохраняет URL и возвращает сгенерированный ID
+// Create сохраняет исходный URL и возвращает сгенерированный короткий идентификатор.
 func (s *ShortenerService) Create(ctx context.Context, url, userID string) (string, error) {
 	for i := 0; i < maxGenerateAttempts; i++ {
 		id, err := GenerateID(8)
@@ -94,7 +93,7 @@ func (s *ShortenerService) CreateBatch(ctx context.Context, urls []string, userI
 	return nil, errors.New("cannot generate unique ids after 10 attempts")
 }
 
-// Resolve возвращает оригинальный URL по ID
+// Resolve возвращает исходный URL по короткому идентификатору.
 func (s *ShortenerService) Resolve(ctx context.Context, id string) (string, error) {
 	originalURL, err := s.repo.Load(ctx, id)
 	if err != nil {
@@ -113,20 +112,37 @@ func (s *ShortenerService) FindByUserID(ctx context.Context, userID string) ([]m
 	return s.repo.FindByUserID(ctx, userID)
 }
 
-// GenerateID создаёт случайный ID длиной n
+// GenerateID создаёт криптографически случайный короткий идентификатор длиной n.
 func GenerateID(n int) (string, error) {
-	var result strings.Builder
-	result.Grow(n)
-
-	for i := 0; i < n; i++ {
-		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
-		if err != nil {
-			return "", err
-		}
-		result.WriteByte(letters[num.Int64()])
+	if n < 0 {
+		return "", errors.New("invalid id length")
+	}
+	if n == 0 {
+		return "", nil
 	}
 
-	return result.String(), nil
+	result := make([]byte, n)
+	randomBytes := make([]byte, n)
+
+	for i := 0; i < n; {
+		if _, err := rand.Read(randomBytes); err != nil {
+			return "", err
+		}
+
+		for _, randomByte := range randomBytes {
+			if randomByte >= randomByteLimit {
+				continue
+			}
+
+			result[i] = letters[int(randomByte)%len(letters)]
+			i++
+			if i == n {
+				break
+			}
+		}
+	}
+
+	return string(result), nil
 }
 
 func buildBatchRecords(urls []string, userID string) ([]repository.BatchRecord, []string, error) {

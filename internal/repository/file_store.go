@@ -39,6 +39,7 @@ type storedFileData struct {
 	UserURLs []storedUserURLRecord `json:"user_urls,omitempty"`
 }
 
+// FileStore хранит сокращённые URL в файле и восстанавливает данные при старте.
 type FileStore struct {
 	mu            sync.RWMutex
 	path          string
@@ -52,6 +53,7 @@ type FileStore struct {
 	nextUUID      int
 }
 
+// NewFileStore создаёт файловое хранилище и загружает ранее сохранённые записи.
 func NewFileStore(path string) (*FileStore, error) {
 	store := &FileStore{
 		path:          path,
@@ -70,6 +72,7 @@ func NewFileStore(path string) (*FileStore, error) {
 	return store, nil
 }
 
+// Store сохраняет исходный URL по короткому идентификатору в файловом хранилище.
 func (s *FileStore) Store(_ context.Context, id, url, userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -121,6 +124,7 @@ func (s *FileStore) persistUserAssociation(userID, shortID string) error {
 	return &URLConflictError{ShortID: shortID}
 }
 
+// BatchStore сохраняет пакет URL в файловом хранилище.
 func (s *FileStore) BatchStore(_ context.Context, records []BatchRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -177,6 +181,7 @@ func (s *FileStore) BatchStore(_ context.Context, records []BatchRecord) error {
 	return nil
 }
 
+// Load возвращает исходный URL из файлового хранилища по короткому идентификатору.
 func (s *FileStore) Load(_ context.Context, id string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
