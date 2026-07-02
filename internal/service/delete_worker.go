@@ -66,7 +66,7 @@ func (s *ShortenerService) runDeleteWorker(ctx context.Context) {
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), deleteFlushTimeout)
+		flushCtx, cancel := context.WithTimeout(context.Background(), deleteFlushTimeout)
 		defer cancel()
 
 		for userID, shortIDsSet := range pending {
@@ -75,7 +75,7 @@ func (s *ShortenerService) runDeleteWorker(ctx context.Context) {
 				shortIDs = append(shortIDs, shortID)
 			}
 
-			if err := s.repo.MarkDeleted(ctx, userID, shortIDs); err != nil {
+			if err := s.repo.MarkDeleted(flushCtx, userID, shortIDs); err != nil {
 				log.Error().
 					Err(err).
 					Str("user_id", userID).

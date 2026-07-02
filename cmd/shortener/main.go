@@ -44,8 +44,8 @@ func run() error {
 	}
 	if database != nil {
 		defer func() {
-			if err := database.Close(); err != nil {
-				log.Error().Err(err).Msg("Error closing database connection")
+			if closeErr := database.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("Error closing database connection")
 			}
 		}()
 	}
