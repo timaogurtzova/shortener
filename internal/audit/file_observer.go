@@ -57,11 +57,12 @@ func (o *FileObserver) Update(ctx context.Context, event Event) error {
 		return err
 	}
 
-	line, err := json.Marshal(event)
-	if err != nil {
+	buf := jsonBufferPool.Get()
+	defer jsonBufferPool.Put(buf)
+
+	if err := json.NewEncoder(buf).Encode(event); err != nil {
 		return err
 	}
-	line = append(line, '\n')
 
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -70,7 +71,7 @@ func (o *FileObserver) Update(ctx context.Context, event Event) error {
 		return errors.New("audit file observer is closed")
 	}
 
-	_, err = o.file.Write(line)
+	_, err := o.file.Write(buf.Bytes())
 	return err
 }
 

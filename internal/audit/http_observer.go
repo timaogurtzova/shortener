@@ -1,7 +1,6 @@
 package audit
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -50,12 +49,14 @@ func (o *HTTPObserver) Update(ctx context.Context, event Event) error {
 		ctx = context.Background()
 	}
 
-	body, err := json.Marshal(event)
-	if err != nil {
+	body := jsonBufferPool.Get()
+	defer jsonBufferPool.Put(body)
+
+	if err := json.NewEncoder(body).Encode(event); err != nil {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.url, body)
 	if err != nil {
 		return err
 	}
