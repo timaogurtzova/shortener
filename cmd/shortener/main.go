@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -21,12 +23,35 @@ const (
 	auditQueueSize       = 1024
 	auditDeliveryTimeout = 2 * time.Second
 	auditShutdownTimeout = 5 * time.Second
+	emptyBuildValue      = "N/A"
+)
+
+var (
+	buildVersion string
+	buildDate    string
+	buildCommit  string
 )
 
 func main() {
+	printBuildInfo(os.Stdout)
+
 	if err := run(); err != nil {
 		log.Fatal().Err(err).Msg("application stopped with error")
 	}
+}
+
+func printBuildInfo(w io.Writer) {
+	fmt.Fprintf(w, "Build version: %s\n", buildValue(buildVersion))
+	fmt.Fprintf(w, "Build date: %s\n", buildValue(buildDate))
+	fmt.Fprintf(w, "Build commit: %s\n", buildValue(buildCommit))
+}
+
+func buildValue(value string) string {
+	if value == "" {
+		return emptyBuildValue
+	}
+
+	return value
 }
 
 // run инициализирует зависимости приложения и запускает HTTP-сервер.
@@ -44,8 +69,8 @@ func run() error {
 	}
 	if database != nil {
 		defer func() {
-			if err := database.Close(); err != nil {
-				log.Error().Err(err).Msg("Error closing database connection")
+			if closeErr := database.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("Error closing database connection")
 			}
 		}()
 	}
