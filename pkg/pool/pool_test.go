@@ -67,18 +67,24 @@ func TestPoolPutResetsObject(t *testing.T) {
 	}
 }
 
-func TestPoolPutIgnoresNilObject(t *testing.T) {
-	pool := resetpool.New(newTestObject)
+func TestPoolPutIgnoresNilInterface(t *testing.T) {
+	pool := resetpool.New(func() resetpool.Resetter {
+		return newTestObject()
+	})
 
-	var object *testObject
+	var object resetpool.Resetter
 	pool.Put(object)
 
 	got := pool.Get()
 	if got == nil {
 		t.Fatal("Get returned nil after nil object was ignored")
 	}
-	if got.resetCount != 0 {
-		t.Fatalf("nil object should not be reset, got reset count %d", got.resetCount)
+	gotObject, ok := got.(*testObject)
+	if !ok {
+		t.Fatalf("Get returned unexpected type %T", got)
+	}
+	if gotObject.resetCount != 0 {
+		t.Fatalf("nil object should not be reset, got reset count %d", gotObject.resetCount)
 	}
 }
 
@@ -88,7 +94,17 @@ func TestNewPanicsOnNilConstructor(t *testing.T) {
 	})
 }
 
-func TestGetPanicsWhenConstructorReturnsNil(t *testing.T) {
+func TestGetPanicsWhenConstructorReturnsNilInterface(t *testing.T) {
+	pool := resetpool.New(func() resetpool.Resetter {
+		return nil
+	})
+
+	assertPanic(t, func() {
+		_ = pool.Get()
+	})
+}
+
+func TestGetPanicsWhenPointerConstructorReturnsNil(t *testing.T) {
 	pool := resetpool.New(func() *testObject {
 		return nil
 	})

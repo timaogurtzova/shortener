@@ -29,7 +29,7 @@ func New[T Resetter](newObject func() T) *Pool[T] {
 		items: sync.Pool{
 			New: func() any {
 				object := newObject()
-				if isNil(object) {
+				if isNilConstructorResult(object) {
 					panic("pool: new object function returned nil")
 				}
 
@@ -50,8 +50,9 @@ func (p *Pool[T]) Get() T {
 }
 
 // Put сбрасывает состояние объекта и помещает его в пул.
+// Метод ожидает ненулевой объект; типизированный nil-указатель считается ошибкой вызывающего кода.
 func (p *Pool[T]) Put(object T) {
-	if isNil(object) {
+	if any(object) == nil {
 		return
 	}
 
@@ -59,7 +60,7 @@ func (p *Pool[T]) Put(object T) {
 	p.items.Put(object)
 }
 
-func isNil[T any](object T) bool {
+func isNilConstructorResult[T any](object T) bool {
 	value := reflect.ValueOf(object)
 	if !value.IsValid() {
 		return true
