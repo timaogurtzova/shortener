@@ -2,6 +2,7 @@ package config
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"net"
 	"net/url"
@@ -71,7 +72,7 @@ type AuditConfiguration struct {
 	URL *string
 }
 
-// IsConfigured сообщает, что путь к файловому хранилищу был явно задан через env или CLI.
+// IsConfigured сообщает, что путь к файловому хранилищу был явно задан в конфигурации.
 func (c StorageConfiguration) IsConfigured() bool {
 	return c.FileStoragePath != nil
 }
@@ -85,7 +86,7 @@ func (c StorageConfiguration) Path() string {
 	return *c.FileStoragePath
 }
 
-// IsConfigured сообщает, что DSN базы данных был явно задан через env или CLI.
+// IsConfigured сообщает, что DSN базы данных был явно задан в конфигурации.
 func (c DatabaseConfiguration) IsConfigured() bool {
 	return c.DSN != nil
 }
@@ -124,27 +125,34 @@ func defaultConfig() *Configuration {
 	}
 }
 
-// LoadConfig загружает конфигурацию из аргументов текущего процесса и переменных окружения.
+// LoadConfig загружает конфигурацию из JSON-файла, аргументов процесса и переменных окружения.
 func LoadConfig() (*Configuration, error) {
 	return loadConfig(os.Args[1:])
 }
 
-// loadConfig собирает конфигурацию с приоритетом окружение > флаги > значения по умолчанию.
+// loadConfig собирает конфигурацию с приоритетом окружение > флаги > JSON > значения по умолчанию.
 func loadConfig(args []string) (*Configuration, error) {
-	cfg := defaultConfig()
-
 	cliCfg, err := parseCLIArgs(args)
 	if err != nil {
 		return nil, err
 	}
-
-	applyCLIConfig(cfg, cliCfg)
 
 	envCfg, err := env.ParseAsWithOptions[envConfig](env.Options{})
 	if err != nil {
 		return nil, err
 	}
 
+	cfg := defaultConfig()
+	configFilePath := resolveConfigFilePath(cliCfg.ConfigFilePath, envCfg.ConfigFilePath)
+	if configFilePath != "" {
+		fileCfg, err := loadFileConfig(configFilePath)
+		if err != nil {
+			return nil, fmt.Errorf("load config file %q: %w", configFilePath, err)
+		}
+		applyFileConfig(cfg, fileCfg)
+	}
+
+	applyCLIConfig(cfg, cliCfg)
 	applyEnvConfig(cfg, envCfg)
 
 	return cfg, nil
@@ -154,10 +162,12 @@ type cliConfig struct {
 	Address         string
 	BaseURL         string
 	EnableHTTPS     bool
+	EnableHTTPSSet  bool
 	FileStoragePath string
 	DatabaseDSN     string
 	AuditFilePath   string
 	AuditURL        string
+	ConfigFilePath  string
 }
 
 // envConfig хранит только значения, явно заданные в переменных окружения.
@@ -172,6 +182,7 @@ type envConfig struct {
 	DatabaseDSN     *string        `env:"DATABASE_DSN"`
 	AuditFilePath   *string        `env:"AUDIT_FILE"`
 	AuditURL        *string        `env:"AUDIT_URL"`
+	ConfigFilePath  *string        `env:"CONFIG"`
 }
 
 // parseCLIArgs разбирает флаги конфигурации из аргументов командной строки.
@@ -190,23 +201,44 @@ func parseCLIArgs(args []string) (cliConfig, error) {
 	fs.StringVar(&cfg.DatabaseDSN, "d", "", "database dsn")
 	fs.StringVar(&cfg.AuditFilePath, "audit-file", "", "audit file path")
 	fs.StringVar(&cfg.AuditURL, "audit-url", "", "audit receiver url")
+	fs.StringVar(&cfg.ConfigFilePath, "c", "", "config file path")
+	fs.StringVar(&cfg.ConfigFilePath, "config", "", "config file path")
 
 	if err := fs.Parse(args); err != nil {
 		return cliConfig{}, err
 	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "s" {
+			cfg.EnableHTTPSSet = true
+		}
+	})
 
 	return cfg, nil
 }
 
-// applyCLIConfig применяет значения из флагов поверх конфигурации по умолчанию.
+// applyCLIConfig применяет явно заданные флаги поверх текущей конфигурации.
 func applyCLIConfig(cfg *Configuration, cliCfg cliConfig) {
-	cfg.Server.Address = resolveAddress(cfg.Server.Address, cliCfg.Address)
-	cfg.Server.BaseURL = resolveBaseURL(cfg.Server.BaseURL, cliCfg.BaseURL)
-	cfg.Server.EnableHTTPS = cliCfg.EnableHTTPS
-	cfg.Storage.FileStoragePath = resolveFileStoragePath(cliCfg.FileStoragePath)
-	cfg.Database.DSN = resolveDatabaseDSN(cliCfg.DatabaseDSN)
-	cfg.Audit.FilePath = resolveAuditFilePath(cliCfg.AuditFilePath)
-	cfg.Audit.URL = resolveAuditURL(cliCfg.AuditURL)
+	if cliCfg.Address != "" {
+		cfg.Server.Address = resolveAddress(cfg.Server.Address, cliCfg.Address)
+	}
+	if cliCfg.BaseURL != "" {
+		cfg.Server.BaseURL = resolveBaseURL(cfg.Server.BaseURL, cliCfg.BaseURL)
+	}
+	if cliCfg.EnableHTTPSSet {
+		cfg.Server.EnableHTTPS = cliCfg.EnableHTTPS
+	}
+	if cliCfg.FileStoragePath != "" {
+		cfg.Storage.FileStoragePath = resolveFileStoragePath(cliCfg.FileStoragePath)
+	}
+	if cliCfg.DatabaseDSN != "" {
+		cfg.Database.DSN = resolveDatabaseDSN(cliCfg.DatabaseDSN)
+	}
+	if cliCfg.AuditFilePath != "" {
+		cfg.Audit.FilePath = resolveAuditFilePath(cliCfg.AuditFilePath)
+	}
+	if cliCfg.AuditURL != "" {
+		cfg.Audit.URL = resolveAuditURL(cliCfg.AuditURL)
+	}
 }
 
 // applyEnvConfig применяет значения из переменных окружения поверх уже собранной конфигурации.

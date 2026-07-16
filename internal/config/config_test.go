@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -152,6 +153,152 @@ func TestLoadConfigUsesTimeoutsFromEnvironment(t *testing.T) {
 	assert.Equal(t, 25*time.Second, cfg.Server.WriteTimeout)
 }
 
+func TestLoadConfigUsesAllSettingsFromJSONFile(t *testing.T) {
+	configPath := writeConfigFile(t, `{
+		"server_address": "localhost:9443",
+		"base_url": "https://localhost:9443",
+		"file_storage_path": "/tmp/from-config.json",
+		"database_dsn": "postgres://config:secret@localhost:5432/configdb?sslmode=disable",
+		"enable_https": true,
+		"server_idle_timeout": "11s",
+		"server_read_timeout": 12000000000,
+		"server_write_timeout": "13s",
+		"audit_file": "/tmp/config-audit.log",
+		"audit_url": "https://audit.example/events"
+	}`)
+
+	cfg, err := loadWithState(t, []string{"-c", configPath}, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, "localhost:9443", cfg.Server.Address)
+	assert.Equal(t, "https://localhost:9443", cfg.Server.BaseURL)
+	assert.True(t, cfg.Server.EnableHTTPS)
+	assert.Equal(t, 11*time.Second, cfg.Server.IdleTimeout)
+	assert.Equal(t, 12*time.Second, cfg.Server.ReadTimeout)
+	assert.Equal(t, 13*time.Second, cfg.Server.WriteTimeout)
+	require.NotNil(t, cfg.Storage.FileStoragePath)
+	assert.Equal(t, "/tmp/from-config.json", *cfg.Storage.FileStoragePath)
+	require.NotNil(t, cfg.Database.DSN)
+	assert.Equal(t, "postgres://config:secret@localhost:5432/configdb?sslmode=disable", *cfg.Database.DSN)
+	require.NotNil(t, cfg.Audit.FilePath)
+	assert.Equal(t, "/tmp/config-audit.log", *cfg.Audit.FilePath)
+	require.NotNil(t, cfg.Audit.URL)
+	assert.Equal(t, "https://audit.example/events", *cfg.Audit.URL)
+}
+
+func TestLoadConfigSupportsLongConfigFlag(t *testing.T) {
+	configPath := writeConfigFile(t, `{"server_address":"localhost:8181"}`)
+
+	cfg, err := loadWithState(t, []string{"-config", configPath}, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, "localhost:8181", cfg.Server.Address)
+}
+
+func TestLoadConfigPriorityIncludesJSONFile(t *testing.T) {
+	configPath := writeConfigFile(t, `{
+		"server_address": "localhost:6060",
+		"base_url": "https://localhost:6060",
+		"file_storage_path": "/tmp/file-config.json",
+		"database_dsn": "postgres://file:secret@localhost:5432/filedb?sslmode=disable",
+		"enable_https": true,
+		"audit_file": "/tmp/file-audit.log",
+		"audit_url": "https://file-audit.example/events"
+	}`)
+
+	cfg, err := loadWithState(t,
+		[]string{
+			"-c", configPath,
+			"-a", "localhost:7070",
+			"-b", "https://localhost:7070",
+			"-f", "/tmp/cli-config.json",
+			"-d", "postgres://cli:secret@localhost:5432/clidb?sslmode=disable",
+			"-s=false",
+			"--audit-file", "/tmp/cli-audit.log",
+			"--audit-url", "https://cli-audit.example/events",
+		},
+		map[string]string{
+			"SERVER_ADDRESS": "localhost:8081",
+			"ENABLE_HTTPS":   "true",
+		},
+	)
+	require.NoError(t, err)
+
+	// env > CLI > JSON > defaults.
+	assert.Equal(t, "localhost:8081", cfg.Server.Address)
+	assert.Equal(t, "https://localhost:7070", cfg.Server.BaseURL)
+	assert.True(t, cfg.Server.EnableHTTPS)
+	require.NotNil(t, cfg.Storage.FileStoragePath)
+	assert.Equal(t, "/tmp/cli-config.json", *cfg.Storage.FileStoragePath)
+	require.NotNil(t, cfg.Database.DSN)
+	assert.Equal(t, "postgres://cli:secret@localhost:5432/clidb?sslmode=disable", *cfg.Database.DSN)
+	require.NotNil(t, cfg.Audit.FilePath)
+	assert.Equal(t, "/tmp/cli-audit.log", *cfg.Audit.FilePath)
+	require.NotNil(t, cfg.Audit.URL)
+	assert.Equal(t, "https://cli-audit.example/events", *cfg.Audit.URL)
+}
+
+func TestExplicitHTTPSFlagOverridesJSONFile(t *testing.T) {
+	configPath := writeConfigFile(t, `{"enable_https":true}`)
+
+	cfg, err := loadWithState(t, []string{"-c", configPath, "-s=false"}, nil)
+	require.NoError(t, err)
+
+	assert.False(t, cfg.Server.EnableHTTPS)
+}
+
+func TestLoadConfigUsesConfigPathFromEnvironment(t *testing.T) {
+	flagConfigPath := writeConfigFile(t, `{"server_address":"localhost:6060"}`)
+	envConfigPath := writeConfigFile(t, `{"server_address":"localhost:7070"}`)
+
+	cfg, err := loadWithState(t,
+		[]string{"-c", flagConfigPath},
+		map[string]string{"CONFIG": envConfigPath},
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, "localhost:7070", cfg.Server.Address)
+}
+
+func TestLoadConfigReturnsConfigFileErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{
+			name:    "malformed JSON",
+			content: `{"server_address":`,
+		},
+		{
+			name:    "unknown option",
+			content: `{"unknown_option":true}`,
+		},
+		{
+			name:    "multiple JSON values",
+			content: `{} {}`,
+		},
+		{
+			name:    "invalid duration",
+			content: `{"server_idle_timeout":"tomorrow"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			configPath := writeConfigFile(t, tt.content)
+
+			_, err := loadWithState(t, []string{"-c", configPath}, nil)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "load config file")
+		})
+	}
+
+	_, err := loadWithState(t, []string{"-c", filepath.Join(t.TempDir(), "missing.json")}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "load config file")
+}
+
 func TestLoadConfigUsesAuditSettings(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -258,6 +405,7 @@ func loadWithState(t *testing.T, args []string, envVars map[string]string) (*con
 		"DATABASE_DSN",
 		"AUDIT_FILE",
 		"AUDIT_URL",
+		"CONFIG",
 	} {
 		previousValue, wasSet := os.LookupEnv(key)
 
@@ -277,4 +425,12 @@ func loadWithState(t *testing.T, args []string, envVars map[string]string) (*con
 	}
 
 	return config.LoadConfig()
+}
+
+func writeConfigFile(t *testing.T, content string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	return path
 }
