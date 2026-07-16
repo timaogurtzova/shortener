@@ -225,6 +225,46 @@ func TestShortenerService_DeleteUserURLs(t *testing.T) {
 	}
 }
 
+func TestShortenerServiceCloseFlushesQueuedDeletions(t *testing.T) {
+	deletedByUser := make(map[string][]string)
+	mockRepo := &mockURLRepository{
+		markDeletedFunc: func(_ context.Context, userID string, shortIDs []string) error {
+			deletedByUser[userID] = append(deletedByUser[userID], shortIDs...)
+			return nil
+		},
+	}
+
+	svc := service.NewShortenerService(context.Background(), mockRepo)
+	require.NoError(t, svc.DeleteUserURLs(context.Background(), "user-1", []string{"abc123", "def456"}))
+	require.NoError(t, svc.DeleteUserURLs(context.Background(), "user-2", []string{"ghi789"}))
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, svc.Close(closeCtx))
+
+	assert.ElementsMatch(t, []string{"abc123", "def456"}, deletedByUser["user-1"])
+	assert.ElementsMatch(t, []string{"ghi789"}, deletedByUser["user-2"])
+	assert.NoError(t, svc.Close(context.Background()), "Close must be idempotent")
+}
+
+func TestShortenerServiceCloseReturnsFlushError(t *testing.T) {
+	wantErr := errors.New("persist deletion")
+	mockRepo := &mockURLRepository{
+		markDeletedFunc: func(_ context.Context, _ string, _ []string) error {
+			return wantErr
+		},
+	}
+
+	svc := service.NewShortenerService(context.Background(), mockRepo)
+	require.NoError(t, svc.DeleteUserURLs(context.Background(), "user-1", []string{"abc123"}))
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err := svc.Close(closeCtx)
+
+	assert.ErrorIs(t, err, wantErr)
+}
+
 var (
 	benchmarkID  string
 	benchmarkIDs []string

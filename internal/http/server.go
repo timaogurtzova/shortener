@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -91,6 +90,23 @@ func NewRouter(handlers RouterHandlers) http.Handler {
 
 // Run запускает HTTP-сервер и выполняет корректное завершение по сигналу ОС или ошибке сервера.
 func (s *Server) Run() error {
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT,
+	)
+	defer stop()
+
+	return s.RunContext(ctx)
+}
+
+// RunContext запускает HTTP-сервер и корректно завершает его после отмены контекста.
+func (s *Server) RunContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	errChan := make(chan error, 1)
 	// Запуск сервера в отдельной горутине
 	go func() {
@@ -102,38 +118,34 @@ func (s *Server) Run() error {
 			Str("addr", s.httpServer.Addr).
 			Msg(protocol + " server started")
 
-		if err := s.listenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errChan <- err
-		}
-
+		errChan <- s.listenAndServe()
 		log.Info().Msg("Stopped serving new connections")
-		close(errChan)
 	}()
 
-	// Канал сигналов ОС
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
-
-	// Ждём либо сигнала ОС, либо ошибки сервера
+	// Ждём либо отмены контекста, либо остановки сервера.
 	select {
-	case sig := <-sigChan:
-		log.Info().Str("signal", sig.String()).Msg("shutdown signal received")
 	case err := <-errChan:
-		if err != nil {
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("server error: %w", err)
 		}
+		return nil
+	case <-ctx.Done():
+		log.Info().Msg("shutdown requested")
 	}
 
 	// Корректное завершение работы сервера.
 	shutdownTimeout := 10 * time.Second
-	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
 	log.Info().Msg("shutting down http server")
 
-	if err := s.httpServer.Shutdown(ctx); err != nil {
+	if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("could not gracefully shutdown: %w", err)
+	}
+
+	if err := <-errChan; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("server error during shutdown: %w", err)
 	}
 
 	log.Info().Msg("Server shutdown gracefully")

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -40,6 +42,10 @@ func (s *ShortenerService) DeleteUserURLs(ctx context.Context, userID string, sh
 	if len(request.shortIDs) == 0 {
 		return nil
 	}
+	if !s.startEnqueue() {
+		return nil
+	}
+	defer s.finishEnqueue()
 
 	select {
 	case s.deleteQueue <- request:
@@ -52,23 +58,74 @@ func (s *ShortenerService) DeleteUserURLs(ctx context.Context, userID string, sh
 	return nil
 }
 
-func (s *ShortenerService) runDeleteWorker(ctx context.Context) {
-	defer close(s.workerDone)
+// Close прекращает приём новых заданий удаления, сохраняет накопленные изменения
+// и ждёт завершения фонового воркера.
+func (s *ShortenerService) Close(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
+	s.closeOnce.Do(func() {
+		s.lifecycleMu.Lock()
+		s.closed = true
+		for s.activeEnqueues > 0 {
+			s.enqueueCond.Wait()
+		}
+		s.workerCancel()
+		s.lifecycleMu.Unlock()
+	})
+
+	select {
+	case <-s.workerDone:
+		s.lifecycleMu.Lock()
+		defer s.lifecycleMu.Unlock()
+		return s.workerErr
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *ShortenerService) startEnqueue() bool {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+
+	if s.closed {
+		return false
+	}
+
+	s.activeEnqueues++
+	return true
+}
+
+func (s *ShortenerService) finishEnqueue() {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+
+	s.activeEnqueues--
+	if s.closed && s.activeEnqueues == 0 {
+		s.enqueueCond.Broadcast()
+	}
+}
+
+func (s *ShortenerService) runDeleteWorker(ctx context.Context) error {
 	ticker := time.NewTicker(deleteFlushInterval)
 	defer ticker.Stop()
 
 	pending := make(map[string]map[string]struct{})
 	pendingCount := 0
 
-	flush := func() {
+	flush := func() error {
 		if pendingCount == 0 {
-			return
+			return nil
 		}
 
 		flushCtx, cancel := context.WithTimeout(context.Background(), deleteFlushTimeout)
 		defer cancel()
 
+		flushErrors := make([]error, 0)
 		for userID, shortIDsSet := range pending {
 			shortIDs := make([]string, 0, len(shortIDsSet))
 			for shortID := range shortIDsSet {
@@ -76,16 +133,15 @@ func (s *ShortenerService) runDeleteWorker(ctx context.Context) {
 			}
 
 			if err := s.repo.MarkDeleted(flushCtx, userID, shortIDs); err != nil {
-				log.Error().
-					Err(err).
-					Str("user_id", userID).
-					Int("short_ids_count", len(shortIDs)).
-					Msg("failed to mark urls as deleted")
+				flushErrors = append(flushErrors, fmt.Errorf("delete urls for user %q: %w", userID, err))
+				continue
 			}
+
+			delete(pending, userID)
+			pendingCount -= len(shortIDsSet)
 		}
 
-		pending = make(map[string]map[string]struct{})
-		pendingCount = 0
+		return errors.Join(flushErrors...)
 	}
 
 	for {
@@ -93,14 +149,28 @@ func (s *ShortenerService) runDeleteWorker(ctx context.Context) {
 		case request := <-s.deleteQueue:
 			pendingCount += addDeleteRequest(pending, request)
 			if pendingCount >= deleteBatchSize {
-				flush()
+				logDeleteFlushError(flush())
 			}
 		case <-ticker.C:
-			flush()
+			logDeleteFlushError(flush())
 		case <-ctx.Done():
-			flush()
-			return
+			for {
+				select {
+				case request := <-s.deleteQueue:
+					pendingCount += addDeleteRequest(pending, request)
+				default:
+					err := flush()
+					logDeleteFlushError(err)
+					return err
+				}
+			}
 		}
+	}
+}
+
+func logDeleteFlushError(err error) {
+	if err != nil {
+		log.Error().Err(err).Msg("failed to flush pending URL deletions")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"sync"
 
 	"github.com/timaogurtzova/shortener/internal/model"
 	"github.com/timaogurtzova/shortener/internal/repository"
@@ -21,9 +22,16 @@ var ErrURLDeleted = errors.New("url deleted")
 
 // ShortenerService реализует бизнес-логику сокращения, поиска и удаления URL.
 type ShortenerService struct {
-	repo        repository.URLRepository
-	deleteQueue chan deleteRequest
-	workerDone  chan struct{}
+	repo           repository.URLRepository
+	deleteQueue    chan deleteRequest
+	workerDone     chan struct{}
+	workerCancel   context.CancelFunc
+	lifecycleMu    sync.Mutex
+	enqueueCond    *sync.Cond
+	activeEnqueues int
+	closed         bool
+	closeOnce      sync.Once
+	workerErr      error
 }
 
 // NewShortenerService создаёт сервис сокращения URL и запускает фоновый воркер удаления.
@@ -31,14 +39,23 @@ func NewShortenerService(ctx context.Context, repo repository.URLRepository) *Sh
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	workerCtx, workerCancel := context.WithCancel(ctx)
 
 	svc := &ShortenerService{
-		repo:        repo,
-		deleteQueue: make(chan deleteRequest, deleteQueueSize),
-		workerDone:  make(chan struct{}),
+		repo:         repo,
+		deleteQueue:  make(chan deleteRequest, deleteQueueSize),
+		workerDone:   make(chan struct{}),
+		workerCancel: workerCancel,
 	}
+	svc.enqueueCond = sync.NewCond(&svc.lifecycleMu)
 
-	go svc.runDeleteWorker(ctx)
+	go func() {
+		err := svc.runDeleteWorker(workerCtx)
+		svc.lifecycleMu.Lock()
+		svc.workerErr = err
+		svc.lifecycleMu.Unlock()
+		close(svc.workerDone)
+	}()
 
 	return svc
 }
