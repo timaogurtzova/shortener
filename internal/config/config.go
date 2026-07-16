@@ -37,6 +37,9 @@ type ServerConfiguration struct {
 	// BaseURL задаёт базовый URL для формирования коротких ссылок.
 	BaseURL string
 
+	// EnableHTTPS включает TLS для входящих HTTP-соединений.
+	EnableHTTPS bool
+
 	// IdleTimeout задаёт максимальное время ожидания неактивного соединения.
 	IdleTimeout time.Duration
 
@@ -103,6 +106,7 @@ func defaultConfig() *Configuration {
 		Server: ServerConfiguration{
 			Address:      "localhost:8080",
 			BaseURL:      "http://localhost:8080",
+			EnableHTTPS:  false,
 			IdleTimeout:  60 * time.Second,
 			ReadTimeout:  60 * time.Second,
 			WriteTimeout: 60 * time.Second,
@@ -149,6 +153,7 @@ func loadConfig(args []string) (*Configuration, error) {
 type cliConfig struct {
 	Address         string
 	BaseURL         string
+	EnableHTTPS     bool
 	FileStoragePath string
 	DatabaseDSN     string
 	AuditFilePath   string
@@ -159,6 +164,7 @@ type cliConfig struct {
 type envConfig struct {
 	Address         *string        `env:"SERVER_ADDRESS"`
 	BaseURL         *string        `env:"BASE_URL"`
+	EnableHTTPS     *bool          `env:"ENABLE_HTTPS"`
 	IdleTimeout     *time.Duration `env:"SERVER_IDLE_TIMEOUT"`
 	ReadTimeout     *time.Duration `env:"SERVER_READ_TIMEOUT"`
 	WriteTimeout    *time.Duration `env:"SERVER_WRITE_TIMEOUT"`
@@ -179,6 +185,7 @@ func parseCLIArgs(args []string) (cliConfig, error) {
 
 	fs.StringVar(&cfg.Address, "a", "", "server address")
 	fs.StringVar(&cfg.BaseURL, "b", "", "base url")
+	fs.BoolVar(&cfg.EnableHTTPS, "s", false, "enable HTTPS")
 	fs.StringVar(&cfg.FileStoragePath, "f", "", "file storage path")
 	fs.StringVar(&cfg.DatabaseDSN, "d", "", "database dsn")
 	fs.StringVar(&cfg.AuditFilePath, "audit-file", "", "audit file path")
@@ -195,6 +202,7 @@ func parseCLIArgs(args []string) (cliConfig, error) {
 func applyCLIConfig(cfg *Configuration, cliCfg cliConfig) {
 	cfg.Server.Address = resolveAddress(cfg.Server.Address, cliCfg.Address)
 	cfg.Server.BaseURL = resolveBaseURL(cfg.Server.BaseURL, cliCfg.BaseURL)
+	cfg.Server.EnableHTTPS = cliCfg.EnableHTTPS
 	cfg.Storage.FileStoragePath = resolveFileStoragePath(cliCfg.FileStoragePath)
 	cfg.Database.DSN = resolveDatabaseDSN(cliCfg.DatabaseDSN)
 	cfg.Audit.FilePath = resolveAuditFilePath(cliCfg.AuditFilePath)
@@ -219,6 +227,11 @@ func applyEnvConfig(cfg *Configuration, envCfg envConfig) {
 		} else {
 			log.Warn().Str("BaseURL", *envCfg.BaseURL).Msg("Invalid BaseURL from environment, using previous value")
 		}
+	}
+
+	if envCfg.EnableHTTPS != nil {
+		cfg.Server.EnableHTTPS = *envCfg.EnableHTTPS
+		log.Info().Bool("EnableHTTPS", *envCfg.EnableHTTPS).Msg("Overriding EnableHTTPS from environment")
 	}
 
 	if envCfg.IdleTimeout != nil {

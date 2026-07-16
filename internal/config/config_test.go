@@ -17,6 +17,7 @@ func TestLoadConfigPriority(t *testing.T) {
 		env                 map[string]string
 		wantAddress         string
 		wantBaseURL         string
+		wantHTTPS           bool
 		wantFileStoragePath string
 		wantStorageConfig   bool
 		wantDatabaseDSN     string
@@ -33,9 +34,10 @@ func TestLoadConfigPriority(t *testing.T) {
 		},
 		{
 			имя:                 "использует флаги, когда env отсутствуют",
-			args:                []string{"-a", "localhost:9090", "-b", "http://localhost:9090", "-f", "/tmp/shortener.json", "-d", "postgres://shortener:secret@localhost:5432/shortener?sslmode=disable"},
+			args:                []string{"-a", "localhost:9090", "-b", "http://localhost:9090", "-s", "-f", "/tmp/shortener.json", "-d", "postgres://shortener:secret@localhost:5432/shortener?sslmode=disable"},
 			wantAddress:         "localhost:9090",
 			wantBaseURL:         "http://localhost:9090",
+			wantHTTPS:           true,
 			wantFileStoragePath: "/tmp/shortener.json",
 			wantStorageConfig:   true,
 			wantDatabaseDSN:     "postgres://shortener:secret@localhost:5432/shortener?sslmode=disable",
@@ -46,11 +48,13 @@ func TestLoadConfigPriority(t *testing.T) {
 			env: map[string]string{
 				"SERVER_ADDRESS":    "localhost:7070",
 				"BASE_URL":          "http://localhost:7070",
+				"ENABLE_HTTPS":      "true",
 				"FILE_STORAGE_PATH": "/var/tmp/shortener.json",
 				"DATABASE_DSN":      "postgres://env:secret@localhost:5432/envdb?sslmode=disable",
 			},
 			wantAddress:         "localhost:7070",
 			wantBaseURL:         "http://localhost:7070",
+			wantHTTPS:           true,
 			wantFileStoragePath: "/var/tmp/shortener.json",
 			wantStorageConfig:   true,
 			wantDatabaseDSN:     "postgres://env:secret@localhost:5432/envdb?sslmode=disable",
@@ -58,10 +62,11 @@ func TestLoadConfigPriority(t *testing.T) {
 		},
 		{
 			имя:  "переменные окружения имеют приоритет над флагами",
-			args: []string{"-a", "localhost:9090", "-b", "http://localhost:9090", "-f", "/tmp/shortener.json", "-d", "postgres://flag:secret@localhost:5432/flagdb?sslmode=disable"},
+			args: []string{"-a", "localhost:9090", "-b", "http://localhost:9090", "-s", "-f", "/tmp/shortener.json", "-d", "postgres://flag:secret@localhost:5432/flagdb?sslmode=disable"},
 			env: map[string]string{
 				"SERVER_ADDRESS":    "localhost:7070",
 				"BASE_URL":          "http://localhost:7070",
+				"ENABLE_HTTPS":      "false",
 				"FILE_STORAGE_PATH": "/var/tmp/shortener.json",
 				"DATABASE_DSN":      "postgres://env:secret@localhost:5432/envdb?sslmode=disable",
 			},
@@ -74,9 +79,10 @@ func TestLoadConfigPriority(t *testing.T) {
 		},
 		{
 			имя:                 "разбирает поддерживаемые cli-флаги в формате через равно",
-			args:                []string{"-a=localhost:6060", "-b=http://localhost:6060", "-f=/tmp/storage.json", "-d=postgres://shortener:secret@localhost:5432/shortener?sslmode=disable"},
+			args:                []string{"-a=localhost:6060", "-b=http://localhost:6060", "-s=true", "-f=/tmp/storage.json", "-d=postgres://shortener:secret@localhost:5432/shortener?sslmode=disable"},
 			wantAddress:         "localhost:6060",
 			wantBaseURL:         "http://localhost:6060",
+			wantHTTPS:           true,
 			wantFileStoragePath: "/tmp/storage.json",
 			wantStorageConfig:   true,
 			wantDatabaseDSN:     "postgres://shortener:secret@localhost:5432/shortener?sslmode=disable",
@@ -105,6 +111,7 @@ func TestLoadConfigPriority(t *testing.T) {
 
 			assert.Equal(t, tt.wantAddress, cfg.Server.Address)
 			assert.Equal(t, tt.wantBaseURL, cfg.Server.BaseURL)
+			assert.Equal(t, tt.wantHTTPS, cfg.Server.EnableHTTPS)
 			assert.Equal(t, tt.wantFileStoragePath, cfg.Storage.Path())
 			assert.Equal(t, tt.wantStorageConfig, cfg.Storage.IsConfigured())
 			if tt.wantDatabaseDSN == "" {
@@ -243,6 +250,7 @@ func loadWithState(t *testing.T, args []string, envVars map[string]string) (*con
 	for _, key := range []string{
 		"SERVER_ADDRESS",
 		"BASE_URL",
+		"ENABLE_HTTPS",
 		"SERVER_IDLE_TIMEOUT",
 		"SERVER_READ_TIMEOUT",
 		"SERVER_WRITE_TIMEOUT",

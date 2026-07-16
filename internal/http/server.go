@@ -19,7 +19,8 @@ import (
 
 // Server управляет жизненным циклом HTTP-сервера приложения.
 type Server struct {
-	httpServer *http.Server
+	httpServer  *http.Server
+	enableHTTPS bool
 }
 
 // RouterHandlers объединяет HTTP-обработчики роутера по именованным полям.
@@ -49,6 +50,7 @@ type RouterHandlers struct {
 // NewServer создаёт HTTP-сервер с адресом, роутером и таймаутами из конфигурации.
 func NewServer(cfg *config.Configuration, router http.Handler) *Server {
 	return &Server{
+		enableHTTPS: cfg.Server.EnableHTTPS,
 		httpServer: &http.Server{
 			Addr:         cfg.Server.Address,
 			Handler:      router,
@@ -92,11 +94,15 @@ func (s *Server) Run() error {
 	errChan := make(chan error, 1)
 	// Запуск сервера в отдельной горутине
 	go func() {
+		protocol := "HTTP"
+		if s.enableHTTPS {
+			protocol = "HTTPS"
+		}
 		log.Info().
 			Str("addr", s.httpServer.Addr).
-			Msg("HTTP server started")
+			Msg(protocol + " server started")
 
-		if err := s.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := s.listenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errChan <- err
 		}
 
@@ -107,6 +113,7 @@ func (s *Server) Run() error {
 	// Канал сигналов ОС
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
 
 	// Ждём либо сигнала ОС, либо ошибки сервера
 	select {
@@ -131,4 +138,20 @@ func (s *Server) Run() error {
 
 	log.Info().Msg("Server shutdown gracefully")
 	return nil
+}
+
+// listenAndServe выбирает HTTP- или HTTPS-режим согласно конфигурации сервера.
+func (s *Server) listenAndServe() error {
+	if !s.enableHTTPS {
+		return s.httpServer.ListenAndServe()
+	}
+
+	tlsConfig, err := newTLSConfig(s.httpServer.Addr)
+	if err != nil {
+		return fmt.Errorf("create TLS config: %w", err)
+	}
+	s.httpServer.TLSConfig = tlsConfig
+
+	// Сертификат уже находится в TLSConfig, поэтому пути к файлам не требуются.
+	return s.httpServer.ListenAndServeTLS("", "")
 }
