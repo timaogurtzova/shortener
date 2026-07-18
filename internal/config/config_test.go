@@ -281,6 +281,10 @@ func TestLoadConfigReturnsConfigFileErrors(t *testing.T) {
 			name:    "invalid duration",
 			content: `{"server_idle_timeout":"tomorrow"}`,
 		},
+		{
+			name:    "unsupported duration type",
+			content: `{"server_idle_timeout":true}`,
+		},
 	}
 
 	for _, tt := range tests {

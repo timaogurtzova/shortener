@@ -30,22 +30,33 @@ type fileConfig struct {
 type jsonDuration time.Duration
 
 func (d *jsonDuration) UnmarshalJSON(data []byte) error {
-	var text string
-	if err := json.Unmarshal(data, &text); err == nil {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return errors.New("duration value is empty")
+	}
+
+	switch {
+	case data[0] == '"':
+		var text string
+		if err := json.Unmarshal(data, &text); err != nil {
+			return fmt.Errorf("decode duration string: %w", err)
+		}
 		value, err := time.ParseDuration(text)
 		if err != nil {
 			return fmt.Errorf("parse duration %q: %w", text, err)
 		}
 		*d = jsonDuration(value)
 		return nil
+	case data[0] == '-' || (data[0] >= '0' && data[0] <= '9'):
+		var nanoseconds int64
+		if err := json.Unmarshal(data, &nanoseconds); err != nil {
+			return fmt.Errorf("decode duration nanoseconds: %w", err)
+		}
+		*d = jsonDuration(time.Duration(nanoseconds))
+		return nil
+	default:
+		return fmt.Errorf("duration must be a string or an integer number of nanoseconds, got %q", data)
 	}
-
-	var nanoseconds int64
-	if err := json.Unmarshal(data, &nanoseconds); err != nil {
-		return fmt.Errorf("duration must be a string or an integer number of nanoseconds: %w", err)
-	}
-	*d = jsonDuration(time.Duration(nanoseconds))
-	return nil
 }
 
 func resolveConfigFilePath(cliValue string, envValue *string) string {

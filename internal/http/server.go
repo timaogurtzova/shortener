@@ -16,6 +16,8 @@ import (
 	httpmiddleware "github.com/timaogurtzova/shortener/internal/http/middleware"
 )
 
+const serverShutdownTimeout = 10 * time.Second
+
 // Server управляет жизненным циклом HTTP-сервера приложения.
 type Server struct {
 	httpServer  *http.Server
@@ -134,8 +136,7 @@ func (s *Server) RunContext(ctx context.Context) error {
 	}
 
 	// Корректное завершение работы сервера.
-	shutdownTimeout := 10 * time.Second
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
 	defer cancel()
 
 	log.Info().Msg("shutting down http server")
