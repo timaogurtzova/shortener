@@ -20,10 +20,11 @@ import (
 )
 
 const (
-	auditQueueSize       = 1024
-	auditDeliveryTimeout = 2 * time.Second
-	auditShutdownTimeout = 5 * time.Second
-	emptyBuildValue      = "N/A"
+	auditQueueSize         = 1024
+	auditDeliveryTimeout   = 2 * time.Second
+	auditShutdownTimeout   = 5 * time.Second
+	serviceShutdownTimeout = 10 * time.Second
+	emptyBuildValue        = "N/A"
 )
 
 var (
@@ -55,7 +56,7 @@ func buildValue(value string) string {
 }
 
 // run инициализирует зависимости приложения и запускает HTTP-сервер.
-func run() error {
+func run() (runErr error) {
 	// Загружаем конфигурацию приложения.
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -70,7 +71,7 @@ func run() error {
 	if database != nil {
 		defer func() {
 			if closeErr := database.Close(); closeErr != nil {
-				log.Error().Err(closeErr).Msg("Error closing database connection")
+				runErr = errors.Join(runErr, fmt.Errorf("close database connection: %w", closeErr))
 			}
 		}()
 	}
@@ -82,10 +83,14 @@ func run() error {
 	}
 
 	// Собираем сервисный и HTTP-слои приложения.
-	serviceCtx, cancelService := context.WithCancel(context.Background())
-	defer cancelService()
-
-	svc := service.NewShortenerService(serviceCtx, repo)
+	svc := service.NewShortenerService(context.Background(), repo)
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), serviceShutdownTimeout)
+		defer cancel()
+		if closeErr := svc.Close(closeCtx); closeErr != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("close shortener service: %w", closeErr))
+		}
+	}()
 	authSecret, err := auth.NewRandomSecret(32)
 	if err != nil {
 		return fmt.Errorf("generate auth secret: %w", err)
@@ -103,8 +108,8 @@ func run() error {
 	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), auditShutdownTimeout)
 		defer cancel()
-		if err := auditDispatcher.Close(closeCtx); err != nil {
-			log.Error().Err(err).Msg("failed to close audit dispatcher")
+		if closeErr := auditDispatcher.Close(closeCtx); closeErr != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("close audit dispatcher: %w", closeErr))
 		}
 	}()
 
@@ -127,8 +132,8 @@ func run() error {
 
 	// Запускаем HTTP-сервер.
 	server := httpserver.NewServer(cfg, router)
-	if err := server.Run(); err != nil {
-		return fmt.Errorf("run http server: %w", err)
+	if serverErr := server.Run(); serverErr != nil {
+		return fmt.Errorf("run http server: %w", serverErr)
 	}
 
 	return nil
