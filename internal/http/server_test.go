@@ -288,6 +288,25 @@ func TestServerRouting(t *testing.T) {
 	}
 }
 
+func TestServerRoutesInternalStats(t *testing.T) {
+	called := false
+	router := httpserver.NewRouter(httpserver.RouterHandlers{
+		InternalStats: func(w http.ResponseWriter, r *http.Request) {
+			called = true
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"urls":1,"users":1}`))
+		},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `{"urls":1,"users":1}`, rec.Body.String())
+	assert.True(t, called)
+}
+
 func TestLoggingMiddlewareLogsRequestAndResponseData(t *testing.T) {
 	var buf bytes.Buffer
 	oldLogger := log.Logger

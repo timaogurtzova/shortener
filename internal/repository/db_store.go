@@ -51,6 +51,11 @@ const (
 		  AND uu.user_id = $1
 		  AND su.short_url = ANY($2)
 	`
+	selectStatsQuery = `
+		SELECT
+			(SELECT COUNT(*) FROM short_urls),
+			(SELECT COUNT(DISTINCT user_id) FROM user_urls)
+	`
 )
 
 // DBStore хранит сокращённые URL в базе данных.
@@ -183,6 +188,17 @@ func (s *DBStore) FindByUserID(ctx context.Context, userID string) ([]model.User
 	}
 
 	return result, nil
+}
+
+// GetStats возвращает количество сокращённых URL и уникальных пользователей.
+func (s *DBStore) GetStats(ctx context.Context) (model.Stats, error) {
+	var stats model.Stats
+	err := s.db.QueryRowContext(ctx, selectStatsQuery).Scan(&stats.URLs, &stats.Users)
+	if err != nil {
+		return model.Stats{}, err
+	}
+
+	return stats, nil
 }
 
 // MarkDeleted помечает принадлежащие пользователю короткие URL как удалённые.

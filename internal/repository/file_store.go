@@ -220,6 +220,17 @@ func (s *FileStore) FindByUserID(_ context.Context, userID string) ([]model.User
 	return result, nil
 }
 
+// GetStats возвращает количество сокращённых URL и уникальных пользователей.
+func (s *FileStore) GetStats(_ context.Context) (model.Stats, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return model.Stats{
+		URLs:  len(s.urls),
+		Users: len(s.userShortSet),
+	}, nil
+}
+
 // MarkDeleted помечает принадлежащие пользователю короткие URL как удалённые.
 func (s *FileStore) MarkDeleted(_ context.Context, userID string, shortIDs []string) error {
 	s.mu.Lock()

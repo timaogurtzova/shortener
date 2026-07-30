@@ -129,6 +129,11 @@ func (s *ShortenerService) FindByUserID(ctx context.Context, userID string) ([]m
 	return s.repo.FindByUserID(ctx, userID)
 }
 
+// GetStats возвращает агрегированную статистику сервиса.
+func (s *ShortenerService) GetStats(ctx context.Context) (model.Stats, error) {
+	return s.repo.GetStats(ctx)
+}
+
 // GenerateID создаёт криптографически случайный короткий идентификатор длиной n.
 func GenerateID(n int) (string, error) {
 	if n < 0 {

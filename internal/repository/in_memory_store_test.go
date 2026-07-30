@@ -61,3 +61,18 @@ func TestInMemoryStoreMarkDeleted(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, repository.ErrDeleted)
 }
+
+func TestInMemoryStoreGetStats(t *testing.T) {
+	store := repository.NewInMemoryStore()
+	ctx := context.Background()
+
+	require.NoError(t, store.Store(ctx, "abc123", "http://yandex.ru", "user-1"))
+	require.NoError(t, store.Store(ctx, "def456", "http://example.com", "user-1"))
+	require.Error(t, store.Store(ctx, "ignored", "http://yandex.ru", "user-2"))
+	require.NoError(t, store.MarkDeleted(ctx, "user-1", []string{"def456"}))
+
+	stats, err := store.GetStats(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 2, stats.URLs)
+	assert.Equal(t, 2, stats.Users)
+}

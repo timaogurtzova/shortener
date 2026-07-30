@@ -157,6 +157,7 @@ func TestLoadConfigUsesAllSettingsFromJSONFile(t *testing.T) {
 	configPath := writeConfigFile(t, `{
 		"server_address": "localhost:9443",
 		"base_url": "https://localhost:9443",
+		"trusted_subnet": "192.168.10.0/24",
 		"file_storage_path": "/tmp/from-config.json",
 		"database_dsn": "postgres://config:secret@localhost:5432/configdb?sslmode=disable",
 		"enable_https": true,
@@ -172,6 +173,7 @@ func TestLoadConfigUsesAllSettingsFromJSONFile(t *testing.T) {
 
 	assert.Equal(t, "localhost:9443", cfg.Server.Address)
 	assert.Equal(t, "https://localhost:9443", cfg.Server.BaseURL)
+	assert.Equal(t, "192.168.10.0/24", cfg.Server.TrustedSubnet)
 	assert.True(t, cfg.Server.EnableHTTPS)
 	assert.Equal(t, 11*time.Second, cfg.Server.IdleTimeout)
 	assert.Equal(t, 12*time.Second, cfg.Server.ReadTimeout)
@@ -184,6 +186,57 @@ func TestLoadConfigUsesAllSettingsFromJSONFile(t *testing.T) {
 	assert.Equal(t, "/tmp/config-audit.log", *cfg.Audit.FilePath)
 	require.NotNil(t, cfg.Audit.URL)
 	assert.Equal(t, "https://audit.example/events", *cfg.Audit.URL)
+}
+
+func TestLoadConfigUsesTrustedSubnetByPriority(t *testing.T) {
+	configPath := writeConfigFile(t, `{"trusted_subnet":"10.0.0.0/8"}`)
+
+	tests := []struct {
+		name string
+		args []string
+		env  map[string]string
+		want string
+	}{
+		{
+			name: "disabled by default",
+			want: "",
+		},
+		{
+			name: "uses JSON value",
+			args: []string{"-c", configPath},
+			want: "10.0.0.0/8",
+		},
+		{
+			name: "CLI flag overrides JSON",
+			args: []string{"-c", configPath, "-t", "192.168.0.0/16"},
+			want: "192.168.0.0/16",
+		},
+		{
+			name: "environment overrides CLI",
+			args: []string{"-c", configPath, "-t", "192.168.0.0/16"},
+			env:  map[string]string{"TRUSTED_SUBNET": "172.16.0.0/12"},
+			want: "172.16.0.0/12",
+		},
+		{
+			name: "empty environment value disables configured subnet",
+			args: []string{"-c", configPath, "-t", "192.168.0.0/16"},
+			env:  map[string]string{"TRUSTED_SUBNET": ""},
+			want: "",
+		},
+		{
+			name: "explicit empty CLI value disables JSON subnet",
+			args: []string{"-c", configPath, "-t", ""},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := loadWithState(t, tt.args, tt.env)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.Server.TrustedSubnet)
+		})
+	}
 }
 
 func TestLoadConfigSupportsLongConfigFlag(t *testing.T) {
@@ -401,6 +454,7 @@ func loadWithState(t *testing.T, args []string, envVars map[string]string) (*con
 	for _, key := range []string{
 		"SERVER_ADDRESS",
 		"BASE_URL",
+		"TRUSTED_SUBNET",
 		"ENABLE_HTTPS",
 		"SERVER_IDLE_TIMEOUT",
 		"SERVER_READ_TIMEOUT",

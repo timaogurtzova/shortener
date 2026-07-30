@@ -200,6 +200,21 @@ func TestShortenerService_FindByUserID(t *testing.T) {
 	assert.Equal(t, expected, actual)
 }
 
+func TestShortenerServiceGetStats(t *testing.T) {
+	expected := model.Stats{URLs: 7, Users: 2}
+	repo := &mockURLRepository{
+		getStatsFunc: func(ctx context.Context) (model.Stats, error) {
+			return expected, nil
+		},
+	}
+	svc := service.NewShortenerService(context.Background(), repo)
+
+	actual, err := svc.GetStats(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, expected, actual)
+}
+
 func TestShortenerService_DeleteUserURLs(t *testing.T) {
 	called := make(chan []string, 1)
 

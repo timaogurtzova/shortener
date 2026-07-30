@@ -15,6 +15,7 @@ type mockURLRepository struct {
 	loadFunc        func(ctx context.Context, id string) (string, error)
 	findByUserFunc  func(ctx context.Context, userID string) ([]model.UserURL, error)
 	markDeletedFunc func(ctx context.Context, userID string, shortIDs []string) error
+	getStatsFunc    func(ctx context.Context) (model.Stats, error)
 }
 
 func (m *mockURLRepository) Store(ctx context.Context, id, url, userID string) error {
@@ -50,4 +51,11 @@ func (m *mockURLRepository) MarkDeleted(ctx context.Context, userID string, shor
 		return m.markDeletedFunc(ctx, userID, shortIDs)
 	}
 	return nil
+}
+
+func (m *mockURLRepository) GetStats(ctx context.Context) (model.Stats, error) {
+	if m.getStatsFunc != nil {
+		return m.getStatsFunc(ctx)
+	}
+	return model.Stats{}, errors.New("not implemented")
 }

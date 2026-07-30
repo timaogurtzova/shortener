@@ -120,6 +120,10 @@ func run() (runErr error) {
 	redirectHandler.SetAuditPublisher(auditDispatcher)
 	redirectHandler.SetUserIDResolver(authenticator)
 	pingHandler := handler.NewPingHandler(database)
+	statsHandler, err := handler.NewStatsHandler(svc, cfg.Server.TrustedSubnet)
+	if err != nil {
+		return fmt.Errorf("initialize stats handler: %w", err)
+	}
 	router := httpserver.NewRouter(httpserver.RouterHandlers{
 		CreateShortURLPlainText: createHandler.CreateShortURLPlainText,
 		CreateShortURLJSON:      createHandler.CreateShortURLJSON,
@@ -128,6 +132,7 @@ func run() (runErr error) {
 		DeleteUserURLs:          userHandler.DeleteUserURLs,
 		Redirect:                redirectHandler.Redirect,
 		Ping:                    pingHandler.Ping,
+		InternalStats:           statsHandler.GetStats,
 	})
 
 	// Запускаем HTTP-сервер.

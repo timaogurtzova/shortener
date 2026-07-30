@@ -29,3 +29,9 @@ type HealthChecker interface {
 	// Ping проверяет готовность зависимости к работе.
 	Ping(ctx context.Context) error
 }
+
+// StatsProvider описывает получение агрегированной статистики сервиса.
+type StatsProvider interface {
+	// GetStats возвращает количество сокращённых URL и пользователей.
+	GetStats(ctx context.Context) (model.Stats, error)
+}

@@ -273,3 +273,21 @@ func TestFileStoreMarkDeleted(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, repository.ErrDeleted)
 }
+
+func TestFileStoreGetStatsAfterReload(t *testing.T) {
+	storagePath := filepath.Join(t.TempDir(), "storage.json")
+	ctx := context.Background()
+
+	store, err := repository.NewFileStore(storagePath)
+	require.NoError(t, err)
+	require.NoError(t, store.Store(ctx, "abc123", "http://yandex.ru", "user-1"))
+	require.NoError(t, store.Store(ctx, "def456", "http://example.com", "user-1"))
+	require.Error(t, store.Store(ctx, "ignored", "http://yandex.ru", "user-2"))
+
+	restoredStore, err := repository.NewFileStore(storagePath)
+	require.NoError(t, err)
+	stats, err := restoredStore.GetStats(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 2, stats.URLs)
+	assert.Equal(t, 2, stats.Users)
+}
