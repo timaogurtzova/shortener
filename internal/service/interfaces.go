@@ -6,7 +6,7 @@ import (
 	"github.com/timaogurtzova/shortener/internal/model"
 )
 
-// URLShortener описывает контракт сервиса сокращения URL для HTTP-обработчиков.
+// URLShortener описывает контракт сервиса сокращения URL для транспортных обработчиков.
 type URLShortener interface {
 	// Create сохраняет исходный URL пользователя и возвращает короткий идентификатор.
 	Create(ctx context.Context, url, userID string) (string, error)

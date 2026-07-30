@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	maxBodySize      = 2048
+	maxBodySize      = service.MaxOriginalURLLength + 1024
 	maxBatchBodySize = 65536
 	contentTypeText  = "text/plain"
 	contentTypeJSON  = "application/json"
@@ -55,8 +55,8 @@ func (h *CreateHandler) CreateShortURLPlainText(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	originalURL := strings.TrimSpace(string(body))
-	if originalURL == "" {
+	originalURL, err := service.NormalizeOriginalURL(string(body))
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad request: empty body")
 		return
 	}
@@ -92,8 +92,8 @@ func (h *CreateHandler) CreateShortURLJSON(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	originalURL := strings.TrimSpace(request.URL)
-	if originalURL == "" {
+	originalURL, err := service.NormalizeOriginalURL(request.URL)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad request: empty body")
 		return
 	}
@@ -144,8 +144,8 @@ func (h *CreateHandler) CreateShortURLBatchJSON(w http.ResponseWriter, r *http.R
 
 	for i, item := range request {
 		correlationID := strings.TrimSpace(item.CorrelationID)
-		originalURL := strings.TrimSpace(item.OriginalURL)
-		if correlationID == "" || originalURL == "" {
+		originalURL, err := service.NormalizeOriginalURL(item.OriginalURL)
+		if correlationID == "" || err != nil {
 			writeError(w, http.StatusBadRequest, "bad request")
 			return
 		}

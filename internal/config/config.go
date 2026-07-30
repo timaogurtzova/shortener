@@ -18,6 +18,9 @@ type Configuration struct {
 	// Server хранит настройки HTTP-сервера.
 	Server ServerConfiguration
 
+	// GRPC хранит настройки gRPC-сервера.
+	GRPC GRPCConfiguration
+
 	// Storage хранит настройки файлового хранилища.
 	Storage StorageConfiguration
 
@@ -41,17 +44,23 @@ type ServerConfiguration struct {
 	// TrustedSubnet задаёт доверенную подсеть в формате CIDR для внутренних эндпоинтов.
 	TrustedSubnet string
 
-	// EnableHTTPS включает TLS для входящих HTTP-соединений.
+	// EnableHTTPS включает TLS для входящих HTTP- и gRPC-соединений.
 	EnableHTTPS bool
 
 	// IdleTimeout задаёт максимальное время ожидания неактивного соединения.
 	IdleTimeout time.Duration
 
-	// ReadTimeout задаёт максимальное время чтения HTTP-запроса.
+	// ReadTimeout ограничивает чтение HTTP-запроса и установление gRPC-соединения.
 	ReadTimeout time.Duration
 
-	// WriteTimeout задаёт максимальное время записи HTTP-ответа.
+	// WriteTimeout ограничивает запись HTTP-ответа и выполнение unary RPC.
 	WriteTimeout time.Duration
+}
+
+// GRPCConfiguration описывает настройки gRPC-сервера.
+type GRPCConfiguration struct {
+	// Address задаёт адрес прослушивания gRPC-сервера.
+	Address string
 }
 
 // StorageConfiguration описывает настройки файлового хранилища.
@@ -116,6 +125,9 @@ func defaultConfig() *Configuration {
 			ReadTimeout:   60 * time.Second,
 			WriteTimeout:  60 * time.Second,
 		},
+		GRPC: GRPCConfiguration{
+			Address: "localhost:3200",
+		},
 		Storage: StorageConfiguration{
 			FileStoragePath: nil,
 		},
@@ -170,6 +182,7 @@ func loadConfig(args []string) (*Configuration, error) {
 
 type cliConfig struct {
 	Address          string
+	GRPCAddress      string
 	BaseURL          string
 	TrustedSubnet    string
 	TrustedSubnetSet bool
@@ -185,6 +198,7 @@ type cliConfig struct {
 // envConfig хранит только значения, явно заданные в переменных окружения.
 type envConfig struct {
 	Address         *string        `env:"SERVER_ADDRESS"`
+	GRPCAddress     *string        `env:"GRPC_ADDRESS"`
 	BaseURL         *string        `env:"BASE_URL"`
 	TrustedSubnet   *string        `env:"TRUSTED_SUBNET"`
 	EnableHTTPS     *bool          `env:"ENABLE_HTTPS"`
@@ -208,6 +222,7 @@ func parseCLIArgs(args []string) (cliConfig, error) {
 	fs.SetOutput(io.Discard)
 
 	fs.StringVar(&cfg.Address, "a", "", "server address")
+	fs.StringVar(&cfg.GRPCAddress, "g", "", "gRPC server address")
 	fs.StringVar(&cfg.BaseURL, "b", "", "base url")
 	fs.StringVar(&cfg.TrustedSubnet, "t", "", "trusted subnet in CIDR notation")
 	fs.BoolVar(&cfg.EnableHTTPS, "s", false, "enable HTTPS")
@@ -237,6 +252,9 @@ func parseCLIArgs(args []string) (cliConfig, error) {
 func applyCLIConfig(cfg *Configuration, cliCfg cliConfig) {
 	if cliCfg.Address != "" {
 		cfg.Server.Address = resolveAddress(cfg.Server.Address, cliCfg.Address)
+	}
+	if cliCfg.GRPCAddress != "" {
+		cfg.GRPC.Address = resolveGRPCAddress(cfg.GRPC.Address, cliCfg.GRPCAddress)
 	}
 	if cliCfg.BaseURL != "" {
 		cfg.Server.BaseURL = resolveBaseURL(cfg.Server.BaseURL, cliCfg.BaseURL)
@@ -269,6 +287,15 @@ func applyEnvConfig(cfg *Configuration, envCfg envConfig) {
 			log.Info().Str("Address", *envCfg.Address).Msg("Overriding Address from environment")
 		} else {
 			log.Warn().Str("Address", *envCfg.Address).Msg("Invalid Address from environment, using previous value")
+		}
+	}
+
+	if envCfg.GRPCAddress != nil {
+		if isValidAddress(*envCfg.GRPCAddress) {
+			cfg.GRPC.Address = *envCfg.GRPCAddress
+			log.Info().Str("GRPCAddress", *envCfg.GRPCAddress).Msg("Overriding GRPCAddress from environment")
+		} else {
+			log.Warn().Str("GRPCAddress", *envCfg.GRPCAddress).Msg("Invalid GRPCAddress from environment, using previous value")
 		}
 	}
 
@@ -354,6 +381,17 @@ func resolveAddress(defaultValue, cliValue string) string {
 	}
 
 	log.Info().Str("Address", defaultValue).Msg("Using default Address")
+	return defaultValue
+}
+
+// resolveGRPCAddress выбирает адрес gRPC-сервера из флагов или оставляет предыдущее значение.
+func resolveGRPCAddress(defaultValue, cliValue string) string {
+	if isValidAddress(cliValue) {
+		log.Info().Str("GRPCAddress", cliValue).Msg("Overriding GRPCAddress from CLI")
+		return cliValue
+	}
+
+	log.Warn().Str("GRPCAddress", cliValue).Msg("Invalid CLI GRPCAddress, using previous value")
 	return defaultValue
 }
 

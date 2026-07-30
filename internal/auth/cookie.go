@@ -18,6 +18,9 @@ const cookieTTL = 365 * 24 * time.Hour
 // ErrUserIDMissing возвращается, когда cookie корректно подписана, но не содержит user ID.
 var ErrUserIDMissing = errors.New("user id is missing")
 
+// ErrAuthorizationInvalid возвращается для некорректных авторизационных данных.
+var ErrAuthorizationInvalid = errors.New("authorization is invalid")
+
 type cookieState int
 
 const (
@@ -118,6 +121,39 @@ func (a *Authenticator) UserID(r *http.Request) (string, bool, error) {
 	return "", false, nil
 }
 
+// EnsureAuthorization возвращает существующий user ID из authorization либо
+// создаёт нового пользователя и возвращает новое подписанное значение.
+func (a *Authenticator) EnsureAuthorization(authorization string) (userID, newAuthorization string, err error) {
+	userID, state := a.resolveAuthorization(authorization)
+	if state == cookieStateValid {
+		return userID, "", nil
+	}
+
+	return a.newAuthorization()
+}
+
+// AuthorizationForHistory возвращает user ID для запроса истории.
+// При отсутствии authorization создаёт нового пользователя, а некорректные
+// данные отклоняет.
+func (a *Authenticator) AuthorizationForHistory(authorization string) (userID, newAuthorization string, err error) {
+	userID, state := a.resolveAuthorization(authorization)
+
+	switch state {
+	case cookieStateValid:
+		return userID, "", nil
+	case cookieStateMissing:
+		return a.newAuthorization()
+	default:
+		return "", "", ErrAuthorizationInvalid
+	}
+}
+
+// AuthorizationUserID возвращает существующий валидный user ID, не создавая нового.
+func (a *Authenticator) AuthorizationUserID(authorization string) (string, bool) {
+	userID, state := a.resolveAuthorization(authorization)
+	return userID, state == cookieStateValid
+}
+
 func (a *Authenticator) resolveUserID(r *http.Request) (string, cookieState, error) {
 	cookie, err := r.Cookie(a.cookieName)
 	if err != nil {
@@ -129,6 +165,37 @@ func (a *Authenticator) resolveUserID(r *http.Request) (string, cookieState, err
 
 	userID, state := a.decode(cookie.Value)
 	return userID, state, nil
+}
+
+func (a *Authenticator) resolveAuthorization(authorization string) (string, cookieState) {
+	authorization = strings.TrimSpace(authorization)
+	if authorization == "" {
+		return "", cookieStateMissing
+	}
+
+	token := authorization
+	fields := strings.Fields(authorization)
+	if len(fields) == 2 && strings.EqualFold(fields[0], "Bearer") {
+		token = fields[1]
+	} else if strings.HasPrefix(token, a.cookieName+"=") {
+		token = strings.TrimPrefix(token, a.cookieName+"=")
+	}
+
+	return a.decode(token)
+}
+
+func (a *Authenticator) newAuthorization() (userID, authorization string, err error) {
+	userID, err = generateUserID(16)
+	if err != nil {
+		return "", "", err
+	}
+
+	authorization, err = a.encode(userID)
+	if err != nil {
+		return "", "", err
+	}
+
+	return userID, authorization, nil
 }
 
 func (a *Authenticator) setCookie(w http.ResponseWriter, r *http.Request, userID string) error {
