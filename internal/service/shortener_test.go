@@ -89,7 +89,7 @@ func TestShortenerService_Resolve(t *testing.T) {
 		{
 			name: "id не найден",
 			mockLoad: func(ctx context.Context, id string) (string, error) {
-				return "", errors.New("not found")
+				return "", repository.ErrNotFound
 			},
 			wantURL: "",
 			wantErr: true,
@@ -114,8 +114,11 @@ func TestShortenerService_Resolve(t *testing.T) {
 			url, err := svc.Resolve(context.Background(), "abc123")
 			if tt.wantErr {
 				assert.Error(t, err)
-				if tt.name == "id удалён" {
+				switch tt.name {
+				case "id удалён":
 					assert.ErrorIs(t, err, service.ErrURLDeleted)
+				case "id не найден":
+					assert.ErrorIs(t, err, service.ErrURLNotFound)
 				}
 			} else {
 				assert.NoError(t, err)
@@ -197,6 +200,21 @@ func TestShortenerService_FindByUserID(t *testing.T) {
 
 	actual, err := svc.FindByUserID(context.Background(), "user-1")
 	assert.NoError(t, err)
+	assert.Equal(t, expected, actual)
+}
+
+func TestShortenerServiceGetStats(t *testing.T) {
+	expected := model.Stats{URLs: 7, Users: 2}
+	repo := &mockURLRepository{
+		getStatsFunc: func(ctx context.Context) (model.Stats, error) {
+			return expected, nil
+		},
+	}
+	svc := service.NewShortenerService(context.Background(), repo)
+
+	actual, err := svc.GetStats(context.Background())
+
+	require.NoError(t, err)
 	assert.Equal(t, expected, actual)
 }
 

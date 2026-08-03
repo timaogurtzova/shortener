@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/rs/zerolog/log"
 	"github.com/timaogurtzova/shortener/internal/audit"
 	"github.com/timaogurtzova/shortener/internal/auth"
 	"github.com/timaogurtzova/shortener/internal/config"
+	grpcserver "github.com/timaogurtzova/shortener/internal/grpc"
 	httpserver "github.com/timaogurtzova/shortener/internal/http"
 	"github.com/timaogurtzova/shortener/internal/http/handler"
 	"github.com/timaogurtzova/shortener/internal/postgres"
@@ -55,7 +58,7 @@ func buildValue(value string) string {
 	return value
 }
 
-// run инициализирует зависимости приложения и запускает HTTP-сервер.
+// run инициализирует зависимости приложения и запускает HTTP- и gRPC-серверы.
 func run() (runErr error) {
 	// Загружаем конфигурацию приложения.
 	cfg, err := config.LoadConfig()
@@ -82,7 +85,7 @@ func run() (runErr error) {
 		return fmt.Errorf("initialize url repository: %w", err)
 	}
 
-	// Собираем сервисный и HTTP-слои приложения.
+	// Собираем сервисный и транспортные слои приложения.
 	svc := service.NewShortenerService(context.Background(), repo)
 	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), serviceShutdownTimeout)
@@ -120,6 +123,15 @@ func run() (runErr error) {
 	redirectHandler.SetAuditPublisher(auditDispatcher)
 	redirectHandler.SetUserIDResolver(authenticator)
 	pingHandler := handler.NewPingHandler(database)
+	statsHandler, err := handler.NewStatsHandler(svc, cfg.Server.TrustedSubnet)
+	if err != nil {
+		return fmt.Errorf("initialize stats handler: %w", err)
+	}
+	grpcHandler, err := grpcserver.NewHandler(svc, cfg.Server.BaseURL, authenticator, auditDispatcher)
+	if err != nil {
+		return fmt.Errorf("initialize gRPC handler: %w", err)
+	}
+
 	router := httpserver.NewRouter(httpserver.RouterHandlers{
 		CreateShortURLPlainText: createHandler.CreateShortURLPlainText,
 		CreateShortURLJSON:      createHandler.CreateShortURLJSON,
@@ -128,15 +140,64 @@ func run() (runErr error) {
 		DeleteUserURLs:          userHandler.DeleteUserURLs,
 		Redirect:                redirectHandler.Redirect,
 		Ping:                    pingHandler.Ping,
+		InternalStats:           statsHandler.GetStats,
 	})
 
-	// Запускаем HTTP-сервер.
-	server := httpserver.NewServer(cfg, router)
-	if serverErr := server.Run(); serverErr != nil {
-		return fmt.Errorf("run http server: %w", serverErr)
+	httpServer := httpserver.NewServer(cfg, router)
+	grpcServer, err := grpcserver.NewServer(cfg, grpcHandler)
+	if err != nil {
+		return fmt.Errorf("initialize gRPC server: %w", err)
+	}
+
+	runCtx, stopServers := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT,
+	)
+	defer stopServers()
+
+	if serverErr := runServers(runCtx, httpServer, grpcServer); serverErr != nil {
+		return fmt.Errorf("run servers: %w", serverErr)
 	}
 
 	return nil
+}
+
+type contextServer interface {
+	RunContext(context.Context) error
+}
+
+func runServers(ctx context.Context, servers ...contextServer) error {
+	if len(servers) == 0 {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	errCh := make(chan error, len(servers))
+	for _, server := range servers {
+		server := server
+		go func() {
+			errCh <- server.RunContext(runCtx)
+		}()
+	}
+
+	errs := make([]error, 0, len(servers))
+	for i := range servers {
+		if err := <-errCh; err != nil {
+			errs = append(errs, err)
+		}
+		if i == 0 {
+			cancel()
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 func newAuditDispatcher(cfg config.AuditConfiguration) (*audit.Dispatcher, error) {

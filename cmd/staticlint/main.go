@@ -1,6 +1,8 @@
 package main
 
 import (
+	"go/ast"
+
 	"github.com/gostaticanalysis/forcetypeassert"
 	"github.com/gostaticanalysis/nilerr"
 	"github.com/timaogurtzova/shortener/cmd/staticlint/noosexit"
@@ -109,11 +111,49 @@ func analyzers() []*analysis.Analyzer {
 	})
 	checks = append(checks,
 		nilerr.Analyzer,
-		forcetypeassert.Analyzer,
+		skipGeneratedDiagnostics(forcetypeassert.Analyzer),
 		noosexit.Analyzer,
 	)
 
 	return checks
+}
+
+// skipGeneratedDiagnostics suppresses diagnostics from generated Go files.
+// Generated protobuf code contains unchecked type assertions by design and
+// must be changed only by regenerating it.
+func skipGeneratedDiagnostics(analyzer *analysis.Analyzer) *analysis.Analyzer {
+	wrapped := *analyzer
+	run := analyzer.Run
+
+	wrapped.Run = func(pass *analysis.Pass) (any, error) {
+		generated := generatedFileNames(pass)
+		filteredPass := *pass
+		filteredPass.Report = func(diagnostic analysis.Diagnostic) {
+			filename := pass.Fset.PositionFor(diagnostic.Pos, false).Filename
+			if _, ok := generated[filename]; ok {
+				return
+			}
+			pass.Report(diagnostic)
+		}
+
+		return run(&filteredPass)
+	}
+
+	return &wrapped
+}
+
+func generatedFileNames(pass *analysis.Pass) map[string]struct{} {
+	files := make(map[string]struct{})
+	for _, file := range pass.Files {
+		if !ast.IsGenerated(file) {
+			continue
+		}
+
+		filename := pass.Fset.PositionFor(file.Pos(), false).Filename
+		files[filename] = struct{}{}
+	}
+
+	return files
 }
 
 func appendLintAnalyzers(dst []*analysis.Analyzer, src []*lint.Analyzer, selected map[string]struct{}) []*analysis.Analyzer {

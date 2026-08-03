@@ -20,6 +20,9 @@ var ErrURLAlreadyExists = errors.New("url already exists")
 // ErrURLDeleted возвращается, когда короткий URL помечен как удалённый.
 var ErrURLDeleted = errors.New("url deleted")
 
+// ErrURLNotFound возвращается, когда короткий URL не найден.
+var ErrURLNotFound = errors.New("url not found")
+
 // ShortenerService реализует бизнес-логику сокращения, поиска и удаления URL.
 type ShortenerService struct {
 	repo           repository.URLRepository
@@ -62,6 +65,11 @@ func NewShortenerService(ctx context.Context, repo repository.URLRepository) *Sh
 
 // Create сохраняет исходный URL и возвращает сгенерированный короткий идентификатор.
 func (s *ShortenerService) Create(ctx context.Context, url, userID string) (string, error) {
+	url, err := NormalizeOriginalURL(url)
+	if err != nil {
+		return "", err
+	}
+
 	for i := 0; i < maxGenerateAttempts; i++ {
 		id, err := GenerateID(8)
 		if err != nil {
@@ -91,8 +99,17 @@ func (s *ShortenerService) CreateBatch(ctx context.Context, urls []string, userI
 		return nil, errors.New("empty batch")
 	}
 
+	normalizedURLs := make([]string, len(urls))
+	for i, originalURL := range urls {
+		normalizedURL, err := NormalizeOriginalURL(originalURL)
+		if err != nil {
+			return nil, err
+		}
+		normalizedURLs[i] = normalizedURL
+	}
+
 	for i := 0; i < maxGenerateAttempts; i++ {
-		records, ids, err := buildBatchRecords(urls, userID)
+		records, ids, err := buildBatchRecords(normalizedURLs, userID)
 		if err != nil {
 			return nil, err
 		}
@@ -117,6 +134,9 @@ func (s *ShortenerService) Resolve(ctx context.Context, id string) (string, erro
 		if errors.Is(err, repository.ErrDeleted) {
 			return "", ErrURLDeleted
 		}
+		if errors.Is(err, repository.ErrNotFound) {
+			return "", ErrURLNotFound
+		}
 
 		return "", err
 	}
@@ -127,6 +147,11 @@ func (s *ShortenerService) Resolve(ctx context.Context, id string) (string, erro
 // FindByUserID возвращает все URL, сокращённые пользователем.
 func (s *ShortenerService) FindByUserID(ctx context.Context, userID string) ([]model.UserURL, error) {
 	return s.repo.FindByUserID(ctx, userID)
+}
+
+// GetStats возвращает агрегированную статистику сервиса.
+func (s *ShortenerService) GetStats(ctx context.Context) (model.Stats, error) {
+	return s.repo.GetStats(ctx)
 }
 
 // GenerateID создаёт криптографически случайный короткий идентификатор длиной n.

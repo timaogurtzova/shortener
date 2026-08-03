@@ -17,6 +17,7 @@ func TestLoadConfigPriority(t *testing.T) {
 		args                []string
 		env                 map[string]string
 		wantAddress         string
+		wantGRPCAddress     string
 		wantBaseURL         string
 		wantHTTPS           bool
 		wantFileStoragePath string
@@ -27,6 +28,7 @@ func TestLoadConfigPriority(t *testing.T) {
 		{
 			имя:                 "использует значения по умолчанию, когда нет env и флагов",
 			wantAddress:         "localhost:8080",
+			wantGRPCAddress:     "localhost:3200",
 			wantBaseURL:         "http://localhost:8080",
 			wantFileStoragePath: "storage.json",
 			wantStorageConfig:   false,
@@ -35,8 +37,9 @@ func TestLoadConfigPriority(t *testing.T) {
 		},
 		{
 			имя:                 "использует флаги, когда env отсутствуют",
-			args:                []string{"-a", "localhost:9090", "-b", "http://localhost:9090", "-s", "-f", "/tmp/shortener.json", "-d", "postgres://shortener:secret@localhost:5432/shortener?sslmode=disable"},
+			args:                []string{"-a", "localhost:9090", "-g", "localhost:9091", "-b", "http://localhost:9090", "-s", "-f", "/tmp/shortener.json", "-d", "postgres://shortener:secret@localhost:5432/shortener?sslmode=disable"},
 			wantAddress:         "localhost:9090",
+			wantGRPCAddress:     "localhost:9091",
 			wantBaseURL:         "http://localhost:9090",
 			wantHTTPS:           true,
 			wantFileStoragePath: "/tmp/shortener.json",
@@ -48,12 +51,14 @@ func TestLoadConfigPriority(t *testing.T) {
 			имя: "использует переменные окружения, когда флаги отсутствуют",
 			env: map[string]string{
 				"SERVER_ADDRESS":    "localhost:7070",
+				"GRPC_ADDRESS":      "localhost:7071",
 				"BASE_URL":          "http://localhost:7070",
 				"ENABLE_HTTPS":      "true",
 				"FILE_STORAGE_PATH": "/var/tmp/shortener.json",
 				"DATABASE_DSN":      "postgres://env:secret@localhost:5432/envdb?sslmode=disable",
 			},
 			wantAddress:         "localhost:7070",
+			wantGRPCAddress:     "localhost:7071",
 			wantBaseURL:         "http://localhost:7070",
 			wantHTTPS:           true,
 			wantFileStoragePath: "/var/tmp/shortener.json",
@@ -63,15 +68,17 @@ func TestLoadConfigPriority(t *testing.T) {
 		},
 		{
 			имя:  "переменные окружения имеют приоритет над флагами",
-			args: []string{"-a", "localhost:9090", "-b", "http://localhost:9090", "-s", "-f", "/tmp/shortener.json", "-d", "postgres://flag:secret@localhost:5432/flagdb?sslmode=disable"},
+			args: []string{"-a", "localhost:9090", "-g", "localhost:9091", "-b", "http://localhost:9090", "-s", "-f", "/tmp/shortener.json", "-d", "postgres://flag:secret@localhost:5432/flagdb?sslmode=disable"},
 			env: map[string]string{
 				"SERVER_ADDRESS":    "localhost:7070",
+				"GRPC_ADDRESS":      "localhost:7071",
 				"BASE_URL":          "http://localhost:7070",
 				"ENABLE_HTTPS":      "false",
 				"FILE_STORAGE_PATH": "/var/tmp/shortener.json",
 				"DATABASE_DSN":      "postgres://env:secret@localhost:5432/envdb?sslmode=disable",
 			},
 			wantAddress:         "localhost:7070",
+			wantGRPCAddress:     "localhost:7071",
 			wantBaseURL:         "http://localhost:7070",
 			wantFileStoragePath: "/var/tmp/shortener.json",
 			wantStorageConfig:   true,
@@ -80,8 +87,9 @@ func TestLoadConfigPriority(t *testing.T) {
 		},
 		{
 			имя:                 "разбирает поддерживаемые cli-флаги в формате через равно",
-			args:                []string{"-a=localhost:6060", "-b=http://localhost:6060", "-s=true", "-f=/tmp/storage.json", "-d=postgres://shortener:secret@localhost:5432/shortener?sslmode=disable"},
+			args:                []string{"-a=localhost:6060", "-g=localhost:6061", "-b=http://localhost:6060", "-s=true", "-f=/tmp/storage.json", "-d=postgres://shortener:secret@localhost:5432/shortener?sslmode=disable"},
 			wantAddress:         "localhost:6060",
+			wantGRPCAddress:     "localhost:6061",
 			wantBaseURL:         "http://localhost:6060",
 			wantHTTPS:           true,
 			wantFileStoragePath: "/tmp/storage.json",
@@ -97,6 +105,7 @@ func TestLoadConfigPriority(t *testing.T) {
 				"DATABASE_DSN":      "",
 			},
 			wantAddress:         "localhost:8080",
+			wantGRPCAddress:     "localhost:3200",
 			wantBaseURL:         "http://localhost:8080",
 			wantFileStoragePath: "/tmp/storage.json",
 			wantStorageConfig:   true,
@@ -111,6 +120,7 @@ func TestLoadConfigPriority(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.wantAddress, cfg.Server.Address)
+			assert.Equal(t, tt.wantGRPCAddress, cfg.GRPC.Address)
 			assert.Equal(t, tt.wantBaseURL, cfg.Server.BaseURL)
 			assert.Equal(t, tt.wantHTTPS, cfg.Server.EnableHTTPS)
 			assert.Equal(t, tt.wantFileStoragePath, cfg.Storage.Path())
@@ -128,15 +138,17 @@ func TestLoadConfigPriority(t *testing.T) {
 
 func TestLoadConfigFallsBackWhenEnvironmentValuesAreInvalid(t *testing.T) {
 	cfg, err := loadWithState(t,
-		[]string{"-a", "localhost:9090", "-b", "http://localhost:9090"},
+		[]string{"-a", "localhost:9090", "-g", "localhost:9091", "-b", "http://localhost:9090"},
 		map[string]string{
 			"SERVER_ADDRESS": "://bad address",
+			"GRPC_ADDRESS":   "://bad gRPC address",
 			"BASE_URL":       "bad-url",
 		},
 	)
 	require.NoError(t, err)
 
 	assert.Equal(t, "localhost:9090", cfg.Server.Address)
+	assert.Equal(t, "localhost:9091", cfg.GRPC.Address)
 	assert.Equal(t, "http://localhost:9090", cfg.Server.BaseURL)
 }
 
@@ -156,7 +168,9 @@ func TestLoadConfigUsesTimeoutsFromEnvironment(t *testing.T) {
 func TestLoadConfigUsesAllSettingsFromJSONFile(t *testing.T) {
 	configPath := writeConfigFile(t, `{
 		"server_address": "localhost:9443",
+		"grpc_address": "localhost:9444",
 		"base_url": "https://localhost:9443",
+		"trusted_subnet": "192.168.10.0/24",
 		"file_storage_path": "/tmp/from-config.json",
 		"database_dsn": "postgres://config:secret@localhost:5432/configdb?sslmode=disable",
 		"enable_https": true,
@@ -171,7 +185,9 @@ func TestLoadConfigUsesAllSettingsFromJSONFile(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "localhost:9443", cfg.Server.Address)
+	assert.Equal(t, "localhost:9444", cfg.GRPC.Address)
 	assert.Equal(t, "https://localhost:9443", cfg.Server.BaseURL)
+	assert.Equal(t, "192.168.10.0/24", cfg.Server.TrustedSubnet)
 	assert.True(t, cfg.Server.EnableHTTPS)
 	assert.Equal(t, 11*time.Second, cfg.Server.IdleTimeout)
 	assert.Equal(t, 12*time.Second, cfg.Server.ReadTimeout)
@@ -186,6 +202,57 @@ func TestLoadConfigUsesAllSettingsFromJSONFile(t *testing.T) {
 	assert.Equal(t, "https://audit.example/events", *cfg.Audit.URL)
 }
 
+func TestLoadConfigUsesTrustedSubnetByPriority(t *testing.T) {
+	configPath := writeConfigFile(t, `{"trusted_subnet":"10.0.0.0/8"}`)
+
+	tests := []struct {
+		name string
+		args []string
+		env  map[string]string
+		want string
+	}{
+		{
+			name: "disabled by default",
+			want: "",
+		},
+		{
+			name: "uses JSON value",
+			args: []string{"-c", configPath},
+			want: "10.0.0.0/8",
+		},
+		{
+			name: "CLI flag overrides JSON",
+			args: []string{"-c", configPath, "-t", "192.168.0.0/16"},
+			want: "192.168.0.0/16",
+		},
+		{
+			name: "environment overrides CLI",
+			args: []string{"-c", configPath, "-t", "192.168.0.0/16"},
+			env:  map[string]string{"TRUSTED_SUBNET": "172.16.0.0/12"},
+			want: "172.16.0.0/12",
+		},
+		{
+			name: "empty environment value disables configured subnet",
+			args: []string{"-c", configPath, "-t", "192.168.0.0/16"},
+			env:  map[string]string{"TRUSTED_SUBNET": ""},
+			want: "",
+		},
+		{
+			name: "explicit empty CLI value disables JSON subnet",
+			args: []string{"-c", configPath, "-t", ""},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := loadWithState(t, tt.args, tt.env)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.Server.TrustedSubnet)
+		})
+	}
+}
+
 func TestLoadConfigSupportsLongConfigFlag(t *testing.T) {
 	configPath := writeConfigFile(t, `{"server_address":"localhost:8181"}`)
 
@@ -198,6 +265,7 @@ func TestLoadConfigSupportsLongConfigFlag(t *testing.T) {
 func TestLoadConfigPriorityIncludesJSONFile(t *testing.T) {
 	configPath := writeConfigFile(t, `{
 		"server_address": "localhost:6060",
+		"grpc_address": "localhost:6061",
 		"base_url": "https://localhost:6060",
 		"file_storage_path": "/tmp/file-config.json",
 		"database_dsn": "postgres://file:secret@localhost:5432/filedb?sslmode=disable",
@@ -210,6 +278,7 @@ func TestLoadConfigPriorityIncludesJSONFile(t *testing.T) {
 		[]string{
 			"-c", configPath,
 			"-a", "localhost:7070",
+			"-g", "localhost:7071",
 			"-b", "https://localhost:7070",
 			"-f", "/tmp/cli-config.json",
 			"-d", "postgres://cli:secret@localhost:5432/clidb?sslmode=disable",
@@ -219,6 +288,7 @@ func TestLoadConfigPriorityIncludesJSONFile(t *testing.T) {
 		},
 		map[string]string{
 			"SERVER_ADDRESS": "localhost:8081",
+			"GRPC_ADDRESS":   "localhost:8082",
 			"ENABLE_HTTPS":   "true",
 		},
 	)
@@ -226,6 +296,7 @@ func TestLoadConfigPriorityIncludesJSONFile(t *testing.T) {
 
 	// env > CLI > JSON > defaults.
 	assert.Equal(t, "localhost:8081", cfg.Server.Address)
+	assert.Equal(t, "localhost:8082", cfg.GRPC.Address)
 	assert.Equal(t, "https://localhost:7070", cfg.Server.BaseURL)
 	assert.True(t, cfg.Server.EnableHTTPS)
 	require.NotNil(t, cfg.Storage.FileStoragePath)
@@ -400,7 +471,9 @@ func loadWithState(t *testing.T, args []string, envVars map[string]string) (*con
 
 	for _, key := range []string{
 		"SERVER_ADDRESS",
+		"GRPC_ADDRESS",
 		"BASE_URL",
+		"TRUSTED_SUBNET",
 		"ENABLE_HTTPS",
 		"SERVER_IDLE_TIMEOUT",
 		"SERVER_READ_TIMEOUT",

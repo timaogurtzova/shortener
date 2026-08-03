@@ -15,7 +15,9 @@ import (
 // fileConfig хранит настройки, которые могут быть заданы в JSON-файле.
 type fileConfig struct {
 	Address         *string       `json:"server_address"`
+	GRPCAddress     *string       `json:"grpc_address"`
 	BaseURL         *string       `json:"base_url"`
+	TrustedSubnet   *string       `json:"trusted_subnet"`
 	EnableHTTPS     *bool         `json:"enable_https"`
 	IdleTimeout     *jsonDuration `json:"server_idle_timeout"`
 	ReadTimeout     *jsonDuration `json:"server_read_timeout"`
@@ -99,12 +101,24 @@ func applyFileConfig(cfg *Configuration, fileCfg fileConfig) {
 		}
 	}
 
+	if fileCfg.GRPCAddress != nil {
+		if isValidAddress(*fileCfg.GRPCAddress) {
+			cfg.GRPC.Address = *fileCfg.GRPCAddress
+		} else {
+			log.Warn().Str("GRPCAddress", *fileCfg.GRPCAddress).Msg("Invalid GRPCAddress from config file, using previous value")
+		}
+	}
+
 	if fileCfg.BaseURL != nil {
 		if isValidURL(*fileCfg.BaseURL) {
 			cfg.Server.BaseURL = *fileCfg.BaseURL
 		} else {
 			log.Warn().Str("BaseURL", *fileCfg.BaseURL).Msg("Invalid BaseURL from config file, using previous value")
 		}
+	}
+
+	if fileCfg.TrustedSubnet != nil {
+		cfg.Server.TrustedSubnet = *fileCfg.TrustedSubnet
 	}
 
 	if fileCfg.EnableHTTPS != nil {

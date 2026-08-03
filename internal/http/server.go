@@ -46,6 +46,9 @@ type RouterHandlers struct {
 
 	// Ping обрабатывает GET /ping для проверки доступности хранилища.
 	Ping http.HandlerFunc
+
+	// InternalStats обрабатывает GET /api/internal/stats с внутренней статистикой.
+	InternalStats http.HandlerFunc
 }
 
 // NewServer создаёт HTTP-сервер с адресом, роутером и таймаутами из конфигурации.
@@ -62,7 +65,7 @@ func NewServer(cfg *config.Configuration, router http.Handler) *Server {
 	}
 }
 
-// NewRouter создаёт HTTP-роутер приложения и регистрирует все публичные эндпоинты.
+// NewRouter создаёт HTTP-роутер приложения и регистрирует его эндпоинты.
 func NewRouter(handlers RouterHandlers) http.Handler {
 	r := chi.NewRouter()
 
@@ -75,6 +78,9 @@ func NewRouter(handlers RouterHandlers) http.Handler {
 	r.Post("/api/shorten/batch", handlers.CreateShortURLBatchJSON)
 	r.Get("/api/user/urls", handlers.GetUserURLs)
 	r.Delete("/api/user/urls", handlers.DeleteUserURLs)
+	if handlers.InternalStats != nil {
+		r.Get("/api/internal/stats", handlers.InternalStats)
+	}
 	r.Get("/ping", handlers.Ping)
 	r.Get("/{id}", handlers.Redirect)
 

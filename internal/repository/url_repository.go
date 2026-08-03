@@ -52,6 +52,8 @@ type BatchRecord struct {
 
 // URLRepository описывает контракт хранилища URL.
 type URLRepository interface {
+	StatsProvider
+
 	// Store сохраняет исходный URL по короткому идентификатору.
 	Store(ctx context.Context, id, url, userID string) error
 
@@ -66,4 +68,10 @@ type URLRepository interface {
 
 	// MarkDeleted помечает указанные короткие URL пользователя как удалённые.
 	MarkDeleted(ctx context.Context, userID string, shortIDs []string) error
+}
+
+// StatsProvider описывает получение агрегированной статистики хранилища.
+type StatsProvider interface {
+	// GetStats возвращает количество сокращённых URL и уникальных пользователей.
+	GetStats(ctx context.Context) (model.Stats, error)
 }
