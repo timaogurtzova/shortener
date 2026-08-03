@@ -47,10 +47,13 @@ func timeoutUnaryServerInterceptor(timeout time.Duration) grpc.UnaryServerInterc
 		defer cancel()
 
 		response, err := handler(requestCtx, request)
+		if err != nil {
+			return response, err
+		}
 		if requestErr := requestCtx.Err(); requestErr != nil {
 			return nil, status.FromContextError(requestErr).Err()
 		}
 
-		return response, err
+		return response, nil
 	}
 }

@@ -188,15 +188,12 @@ func runServers(ctx context.Context, servers ...contextServer) error {
 	}
 
 	errs := make([]error, 0, len(servers))
-	firstErr := <-errCh
-	if firstErr != nil {
-		errs = append(errs, firstErr)
-	}
-	cancel()
-
-	for range len(servers) - 1 {
+	for i := range servers {
 		if err := <-errCh; err != nil {
 			errs = append(errs, err)
+		}
+		if i == 0 {
+			cancel()
 		}
 	}
 

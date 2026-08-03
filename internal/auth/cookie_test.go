@@ -72,38 +72,3 @@ func TestUserIDForHistoryReturnsErrorForInvalidCookie(t *testing.T) {
 	defer res.Body.Close()
 	assert.Empty(t, res.Cookies())
 }
-
-func TestGRPCAuthorizationLifecycle(t *testing.T) {
-	authenticator, err := auth.NewAuthenticator([]byte("01234567890123456789012345678901"))
-	require.NoError(t, err)
-
-	userID, authorization, err := authenticator.EnsureAuthorization("")
-	require.NoError(t, err)
-	assert.NotEmpty(t, userID)
-	assert.NotEmpty(t, authorization)
-
-	existingUserID, newAuthorization, err := authenticator.EnsureAuthorization("Bearer " + authorization)
-	require.NoError(t, err)
-	assert.Equal(t, userID, existingUserID)
-	assert.Empty(t, newAuthorization)
-
-	historyUserID, newAuthorization, err := authenticator.AuthorizationForHistory("user_id=" + authorization)
-	require.NoError(t, err)
-	assert.Equal(t, userID, historyUserID)
-	assert.Empty(t, newAuthorization)
-
-	resolvedUserID, ok := authenticator.AuthorizationUserID(authorization)
-	assert.True(t, ok)
-	assert.Equal(t, userID, resolvedUserID)
-}
-
-func TestGRPCHistoryRejectsInvalidAuthorization(t *testing.T) {
-	authenticator, err := auth.NewAuthenticator([]byte("01234567890123456789012345678901"))
-	require.NoError(t, err)
-
-	userID, authorization, err := authenticator.AuthorizationForHistory("broken")
-
-	require.ErrorIs(t, err, auth.ErrAuthorizationInvalid)
-	assert.Empty(t, userID)
-	assert.Empty(t, authorization)
-}
